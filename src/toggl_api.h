@@ -434,6 +434,13 @@ extern "C" {
         void *context,
         const char_t *path);
 
+    // Redmine backend base URL (e.g. https://redmine.example.com).
+    // Set before logging in.
+
+    TOGGL_EXPORT void toggl_set_base_url(
+        void *context,
+        const char_t *url);
+
     // DB path must be configured from UI
 
     TOGGL_EXPORT bool_t toggl_set_db_path(

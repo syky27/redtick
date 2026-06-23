@@ -348,6 +348,10 @@ void TogglApi::login(const QString email, const QString password) {
                       toCStr(password));
 }
 
+void TogglApi::setBaseURL(const QString url) {
+    toggl_set_base_url(ctx, toCStr(url));
+}
+
 void TogglApi::signup(const QString email, const QString password,
                       const uint64_t countryID) {
     toggl_signup_async(ctx,

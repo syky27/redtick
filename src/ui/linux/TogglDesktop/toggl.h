@@ -76,6 +76,7 @@ class TogglApi : public QObject {
     void setEnvironment(const QString environment);
 
     void login(const QString email, const QString password);
+    void setBaseURL(const QString url);
 
     void signup(const QString email, const QString password,
                 const uint64_t countryID);

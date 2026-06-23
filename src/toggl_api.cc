@@ -390,6 +390,13 @@ void toggl_set_cacert_path(
     toggl::TogglClient::GetInstance().SetCACertPath(to_string(path));
 }
 
+void toggl_set_base_url(
+    void *,
+    const char_t *url) {
+
+    toggl::urls::SetBaseURL(to_string(url));
+}
+
 bool_t toggl_set_db_path(
     void *context,
     const char_t *path) {

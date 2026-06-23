@@ -19,6 +19,16 @@ LoginWidget::LoginWidget(QStackedWidget *parent) : QWidget(parent),
 ui(new Ui::LoginWidget) {
     ui->setupUi(this);
 
+    // Redmine fork: the two credential fields are repurposed as the Redmine
+    // base URL and the personal API key; Toggl-only auth paths are hidden.
+    ui->email->setPlaceholderText("Redmine URL (e.g. https://redmine.example.com)");
+    ui->password->setPlaceholderText("API key");
+    ui->password->setEchoMode(QLineEdit::Normal);
+    ui->googleLogin->hide();
+    ui->forgotPassword->hide();
+    ui->signup->hide();
+    ui->viewchangelabel->hide();
+
     connect(TogglApi::instance, SIGNAL(displayLogin(bool,uint64_t)),  // NOLINT
             this, SLOT(displayLogin(bool,uint64_t)));  // NOLINT
 
@@ -130,7 +140,9 @@ void LoginWidget::on_login_clicked() {
         return;
     }
     enableAllControls(false);
-    TogglApi::instance->login(ui->email->text(), ui->password->text());
+    // email field holds the Redmine URL; password field holds the API key.
+    TogglApi::instance->setBaseURL(ui->email->text());
+    TogglApi::instance->login(ui->password->text(), ui->password->text());
 }
 
 void LoginWidget::on_googleLogin_linkActivated(const QString &link) {
@@ -165,12 +177,12 @@ bool LoginWidget::validateFields(bool signup, bool google) {
     if (!google) {
         if (ui->email->text().isEmpty()) {
             ui->email->setFocus();
-            TogglApi::instance->displayError(QString("Please enter valid email address"), true);
+            TogglApi::instance->displayError(QString("Please enter your Redmine URL"), true);
             return false;
         }
         if (ui->password->text().isEmpty()) {
             ui->password->setFocus();
-            TogglApi::instance->displayError(QString("A password is required"), true);
+            TogglApi::instance->displayError(QString("An API key is required"), true);
             return false;
         }
     }
