@@ -17,6 +17,10 @@ endif()
 
 add_definitions(-DTOGGL_BUILD_TYPE="${TOGGL_BUILD_TYPE}" -DTOGGLDESKTOP_DLL_BUILD)
 
+# This fork targets a Redmine REST backend, which has no batched sync server.
+# Pin the syncer to the legacy per-entity REST path (see Context::syncerActivityWrapper).
+add_definitions(-DTOGGL_SYNC_FORCE_LEGACY)
+
 set(TOGGLDESKTOPLIBRARY_INCLUDE_DIR
     ${CMAKE_CURRENT_SOURCE_DIR}
     PARENT_SCOPE
