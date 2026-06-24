@@ -17,7 +17,15 @@ BIN_NAME="TogglDesktop"             # internal binary/target name (unchanged)
 BUNDLE_ID="cz.suma.redtick"
 BUILD_DIR="build"
 BIN="$BUILD_DIR/src/ui/linux/TogglDesktop/$BIN_NAME"
-ICON_PNG="src/ui/linux/TogglDesktop/icons/1024x1024/toggldesktop.png"
+# Pre-padded macOS master: the raw icon fills the whole 1024 canvas, which makes
+# the app tile render larger than other apps in cmd+Tab / the Dock. This master
+# has the art scaled to Apple's ~824/1024 body with a 100px transparent margin.
+# Regenerate from the raw icon if it changes:
+#   python3 -c "from PIL import Image; c=Image.new('RGBA',(1024,1024),(0,0,0,0)); \
+#     a=Image.open('src/ui/linux/TogglDesktop/icons/1024x1024/toggldesktop.png') \
+#     .convert('RGBA').resize((824,824),Image.LANCZOS); c.paste(a,(100,100),a); \
+#     c.save('dist/mac/redtick-icon-1024.png')"
+ICON_PNG="dist/mac/redtick-icon-1024.png"
 CACERT="src/ssl/cacert.pem"
 QT_PREFIX="$(brew --prefix qt@5)"
 DIST="$BUILD_DIR/pkg-mac"
@@ -71,6 +79,29 @@ PLIST
 # --- bundle Qt frameworks/plugins (fixes the main binary's Qt deps) ---
 echo "==> macdeployqt"
 "$QT_PREFIX/bin/macdeployqt" "$APP" -verbose=1
+
+# --- add plugins macdeployqt skips. It bundles QtSvg + the SVG icon engine
+#     (iconengines/libqsvgicon) but NOT the SVG *image reader*
+#     (imageformats/libqsvg), so Qt can't rasterize `background:url(*.svg)` in a
+#     stylesheet -> the group expand/collapse glyphs fail with "Could not create
+#     pixmap from :/images/group_icon_*.svg". Copy the reader in and repoint its
+#     Homebrew Qt-framework refs at the bundled frameworks (same rewrite
+#     macdeployqt applied to libqsvgicon). ---
+NEEDED_PLUGINS=("imageformats/libqsvg.dylib")
+for rel in "${NEEDED_PLUGINS[@]}"; do
+    dst="$APP/Contents/PlugIns/$rel"
+    [ -f "$dst" ] && continue
+    src="$QT_PREFIX/plugins/$rel"
+    [ -f "$src" ] || { echo "    WARN: $src not found — skipping"; continue; }
+    echo "==> adding plugin $rel (macdeployqt skipped it)"
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst"; chmod u+w "$dst"
+    deps=$(otool -L "$dst" | awk 'NR>1{print $1}' | grep -E '/opt/homebrew.*\.framework/' || true)
+    [ -n "$deps" ] && while IFS= read -r dep; do
+        fw=$(echo "$dep" | sed -E 's#.*/([A-Za-z0-9]+\.framework/.*)$#\1#')
+        install_name_tool -change "$dep" "@executable_path/../Frameworks/$fw" "$dst"
+    done <<< "$deps"
+done
 
 # macdeployqt already bundles Qt frameworks/plugins AND the non-Qt dependent
 # dylibs (POCO/OpenSSL/jsoncpp + libTogglDesktopLibrary/libQxt/libBugsnag) into
