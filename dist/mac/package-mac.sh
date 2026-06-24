@@ -74,13 +74,27 @@ echo "==> macdeployqt"
 
 # macdeployqt already bundles Qt frameworks/plugins AND the non-Qt dependent
 # dylibs (POCO/OpenSSL/jsoncpp + libTogglDesktopLibrary/libQxt/libBugsnag) into
-# Contents/Frameworks and rewrites them to @executable_path/../Frameworks. Strip
-# any leftover Homebrew rpaths so the app never falls back to a host library.
-BINARY="$APP/Contents/MacOS/$BIN_NAME"
-for rp in $(otool -l "$BINARY" | awk '/LC_RPATH/{f=1} f&&/ path /{print $2; f=0}' | grep -E '/opt/homebrew|/usr/local' || true); do
-    echo "==> stripping rpath $rp"
-    install_name_tool -delete_rpath "$rp" "$BINARY" 2>/dev/null || true
-done
+# Contents/Frameworks and rewrites their load commands to @rpath/@executable_path.
+# BUT it leaves the original Homebrew LC_RPATH entries inside some of them — e.g.
+# libTogglDesktopLibrary.dylib keeps `/opt/homebrew/opt/poco/lib`. Since the POCO
+# libs reference each other as `@rpath/libPoco*.dylib`, that stray rpath gives dyld
+# a SECOND place to resolve them, so it loads BOTH the bundled and the Homebrew
+# POCO. Two copies => two Poco::Data::SessionFactory singletons => the SQLite
+# connector registers in one while SetDBPath queries the other => it throws =>
+# the app SIGSEGVs at startup (in Context::displayError). So strip every
+# Homebrew/usr-local rpath from EVERY Mach-O in the bundle; afterwards `@rpath`
+# resolves only via the main binary's @executable_path/../Frameworks.
+echo "==> stripping Homebrew rpaths from all bundled Mach-O files"
+while IFS= read -r f; do
+    rps=$(otool -l "$f" 2>/dev/null \
+        | awk '/^ +cmd /{r=($2=="LC_RPATH")} r&&$1=="path"{print $2}' \
+        | grep -E '/opt/homebrew|/usr/local' || true)
+    [ -n "$rps" ] || continue
+    while IFS= read -r rp; do
+        install_name_tool -delete_rpath "$rp" "$f" 2>/dev/null \
+            && echo "    $(basename "$f"): - $rp"
+    done <<< "$rps"
+done < <(find "$APP/Contents/Frameworks" "$APP/Contents/PlugIns" "$APP/Contents/MacOS" -type f 2>/dev/null)
 
 # --- ad-hoc sign (so the bundle has a stable code identity; still "unsigned"
 #     for Gatekeeper — first launch needs right-click -> Open) ---
@@ -98,5 +112,23 @@ hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" 
 
 echo ""
 echo "==> Built: $DMG"
-echo "    Self-containment check (should show no /opt/homebrew or /usr/local):"
-otool -L "$APP/Contents/MacOS/$BIN_NAME" | grep -E '/opt/homebrew|/usr/local' && echo "    !! still references Homebrew" || echo "    OK — no Homebrew paths in the main binary"
+echo "    Self-containment check — scanning every Mach-O for Homebrew/usr-local"
+echo "    LC_LOAD_DYLIB deps and LC_RPATHs (LC_ID_DYLIB self-names are ignored):"
+LEAK=0
+while IFS= read -r f; do
+    bad=$(otool -l "$f" 2>/dev/null | awk '
+        /^ +cmd /{ if($2=="LC_LOAD_DYLIB"){w=1;k="dep"} else if($2=="LC_RPATH"){w=1;k="rpath"} else {w=0}; next }
+        w && ($1=="name"||$1=="path"){print k" "$2; w=0}
+    ' | grep -E '/opt/homebrew|/usr/local' || true)
+    if [ -n "$bad" ]; then
+        LEAK=1
+        echo "    !! $(basename "$f")"
+        echo "$bad" | sed 's/^/        /'
+    fi
+done < <(find "$APP/Contents/Frameworks" "$APP/Contents/PlugIns" "$APP/Contents/MacOS" -type f 2>/dev/null)
+if [ "$LEAK" = 0 ]; then
+    echo "    OK — fully self-contained (no Homebrew paths in any bundled Mach-O)"
+else
+    echo "    !! Homebrew paths remain — the .dmg would crash on a clean Mac. Failing."
+    exit 1
+fi
