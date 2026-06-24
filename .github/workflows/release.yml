@@ -56,14 +56,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake pkg-config file fuse libfuse2 patchelf curl \
-            qtbase5-dev qtbase5-private-dev libqt5x11extras5-dev \
-            libssl-dev libxss-dev libgl-dev libreadline-dev
-      - name: Configure (bundled libs)
+            qtbase5-dev qtbase5-private-dev libqt5x11extras5-dev libqt5svg5-dev \
+            libpoco-dev libjsoncpp-dev libssl-dev libxss-dev libgl-dev libreadline-dev
+      - name: Configure (system libs)
         run: |
           cmake -S . -B build-appimage \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
-            -DUSE_BUNDLED_LIBRARIES=ON \
             -DTOGGL_BUILD_TESTS=OFF
       - name: Build (sanity)
         run: cmake --build build-appimage --target TogglDesktop -j"$(nproc)"

@@ -26,7 +26,6 @@ if [ ! -x "$BIN" ]; then
     cmake -S . -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr \
-        -DUSE_BUNDLED_LIBRARIES=ON \
         -DTOGGL_BUILD_TESTS=OFF \
         -DTOGGL_VERSION="$VER"
     cmake --build "$BUILD_DIR" --target TogglDesktop -j"$(nproc)"
@@ -61,6 +60,7 @@ fetch linuxdeploy-plugin-qt-x86_64.AppImage https://github.com/linuxdeploy/linux
 export OUTPUT="$APP_NAME-$VER-x86_64.AppImage"
 export VERSION="$VER"
 export QMAKE="${QMAKE:-qmake}"
+export EXTRA_QT_PLUGINS="svg"   # the app renders SVG icons (continue/group glyphs)
 "$TOOLS/linuxdeploy-x86_64.AppImage" \
     --appdir "$APPDIR" \
     --executable "$APPDIR/usr/bin/$BIN_NAME" \
