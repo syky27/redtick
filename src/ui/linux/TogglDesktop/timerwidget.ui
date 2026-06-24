@@ -128,7 +128,7 @@
         <property name="minimumSize">
          <size>
           <width>0</width>
-          <height>16</height>
+          <height>22</height>
          </size>
         </property>
         <property name="styleSheet">
@@ -195,17 +195,17 @@
            <property name="minimumSize">
             <size>
              <width>0</width>
-             <height>16</height>
+             <height>22</height>
             </size>
            </property>
            <property name="maximumSize">
             <size>
              <width>16777215</width>
-             <height>25</height>
+             <height>30</height>
             </size>
            </property>
            <property name="styleSheet">
-            <string notr="true">color: rgb(190, 190, 190);line-height:40px;position:absolute;bottom:5px;font-size:8pt;</string>
+            <string notr="true">color: rgb(230, 230, 230);font-size:13pt;font-weight:bold;</string>
            </property>
            <property name="text">
             <string>NEW TOGGL</string>
@@ -312,7 +312,7 @@
             </size>
            </property>
            <property name="styleSheet">
-            <string notr="true">color: rgb(190, 190, 190);line-height:40px;position:absolute;bottom:5px;font-size:8pt;</string>
+            <string notr="true">color: rgb(190, 190, 190);font-size:10pt;font-weight:bold;</string>
            </property>
            <property name="text">
             <string>NEW TOGGL</string>

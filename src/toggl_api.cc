@@ -1181,6 +1181,14 @@ char_t *toggl_get_user_email(
     return copy_string(app(context)->UserEmail());
 }
 
+char_t *toggl_get_base_url(
+    void *context) {
+    // The Redmine base URL is a process-global (urls::BaseURL()); the context
+    // argument is kept only to mirror the other string getters' signatures.
+    (void)context;
+    return copy_string(toggl::urls::BaseURL());
+}
+
 uint8_t toggl_get_user_beginning_of_week(
     void *context) {
     return app(context)->UserBeginningOfWeek();

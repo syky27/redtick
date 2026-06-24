@@ -1151,6 +1151,10 @@ extern "C" {
     TOGGL_EXPORT char_t *toggl_get_user_email(
         void *context);
 
+    // Redmine base URL (urls::BaseURL()). You must free() the result.
+    TOGGL_EXPORT char_t *toggl_get_base_url(
+        void *context);
+
     TOGGL_EXPORT void toggl_sync(
         void *context);
 

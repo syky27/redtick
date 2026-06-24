@@ -572,6 +572,16 @@ QString TogglApi::userEmail() {
     return res;
 }
 
+QString TogglApi::baseURL() {
+    char_t *url = toggl_get_base_url(ctx);
+    QString res;
+    if (url) {
+        res = toQString(url);
+        free(url);
+    }
+    return res;
+}
+
 QString TogglApi::start(
     const QString &description,
     const QString &duration,

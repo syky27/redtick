@@ -242,6 +242,7 @@ class TogglApi : public QObject {
     QString updateChannel();
 
     QString userEmail();
+    QString baseURL();
 
     // keyboard shortcut saving
     void setShowHideKey(const QString keys);
