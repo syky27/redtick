@@ -6277,44 +6277,9 @@ bool Context::isTimeLockedInWorkspace(time_t t, Workspace* ws) {
 }
 
 error Context::pullWorkspaces() {
-    std::string api_token = user_->APIToken();
-
-    if (api_token.empty()) {
-        return error("cannot pull user data without API token");
-    }
-
-    std::string json("");
-
-    try {
-        HTTPRequest req;
-        req.host = urls::API();
-        req.relative_url = "/api/v9/me/workspaces";
-        req.basic_auth_username = api_token;
-        req.basic_auth_password = "api_token";
-
-        HTTPResponse resp = TogglClient::GetInstance().Get(req);
-        if (resp.err != noError) {
-            if (resp.err.find(kForbiddenError) != std::string::npos) {
-                // User has no workspaces
-                return error(kMissingWS); // NOLINT
-            }
-            return resp.err;
-        }
-
-        json = resp.body;
-
-        user_->LoadWorkspacesFromJSONString(json);
-
-    }
-    catch (const Poco::Exception& exc) {
-        return exc.displayText();
-    }
-    catch (const std::exception& ex) {
-        return ex.what();
-    }
-    catch (const std::string & ex) {
-        return ex;
-    }
+    // Redmine fork: the single workspace is synthesized during account-load
+    // (RedmineClient), so there is no /api/v9/me/workspaces to fetch -- the old
+    // call 404s on Redmine and surfaced as "Request is not possible".
     return noError;
 }
 
@@ -6399,6 +6364,10 @@ error Context::pullWorkspacePreferences(
 }
 
 error Context::pullUserPreferences() {
+    // Redmine fork: /api/v9/me/preferences/desktop is Toggl-specific and 404s on
+    // Redmine ("Request is not possible"). We don't use Toggl user preferences.
+    return noError;
+
     std::string api_token = user_->APIToken();
 
     if (api_token.empty()) {

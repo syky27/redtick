@@ -329,11 +329,10 @@ bool TogglApi::notifyBugsnag(
     const QString errorClass,
     const QString message,
     const QString context) {
-    QHash<QString, QHash<QString, QString> > metadata;
-    if (instance) {
-        metadata["release"]["channel"] = instance->updateChannel();
-    }
-    return Bugsnag::notify(errorClass, message, context, &metadata);
+    // Redmine fork: never send crash/error telemetry to Bugsnag's cloud
+    // (a Toggl-era third-party service, with Toggl's hardcoded key). Log locally.
+    qWarning() << "[error]" << context << errorClass << message;
+    return false;
 }
 
 bool TogglApi::startEvents() {

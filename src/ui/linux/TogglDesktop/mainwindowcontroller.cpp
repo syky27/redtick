@@ -105,6 +105,8 @@ MainWindowController::MainWindowController(
     // item to open the day calendar view.
     calendarView = new CalendarView(this);
     ui->actionReports->setText("Calendar");
+    // Redmine fork: remove the Toggl Help menu entry (linked to support.toggl.com).
+    ui->actionHelp->setVisible(false);
 
     connect(trayIcon, SIGNAL(activated(QSystemTrayIcon::ActivationReason)),
             this, SLOT(toggleWindow(QSystemTrayIcon::ActivationReason)));

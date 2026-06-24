@@ -237,7 +237,9 @@ void TimeEntryEditorWidget::displayTimeEntryEditor(
         // Reset adding new project
         ui->newProject->setVisible(false);
         ui->project->setVisible(true);
-        ui->addNewProject->setVisible(true);
+        // Redmine fork: projects/issues come from Redmine and time must link to an
+        // existing issue, so never offer "add new project".
+        ui->addNewProject->setVisible(false);
         ui->newProjectName->setText("");
         ui->publicProject->setChecked(false);
         ui->newProjectWorkspace->setCurrentIndex(-1);
