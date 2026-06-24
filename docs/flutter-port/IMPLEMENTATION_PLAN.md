@@ -33,7 +33,12 @@ The port has been implemented and is building. Status by issue (✅ done & verif
 - 🟡 FP-52 idle, FP-54 notifications (core streams wired + in-app banners; OS notification = swap `NotificationPresenter`)
 
 **Follow-up (needs device/toolchain/backend):**
-- ⬜ FP-11 Android NDK build · FP-12 iOS xcframework · FP-64 Windows packaging · FP-62/63 store releases
+- 🟡 FP-11 Android build **config authored** (CMake dep-discovery, `build-deps.sh` for
+  OpenSSL/Poco/jsoncpp, Gradle `externalNativeBuild`, core X11/window guards for
+  `__ANDROID__`, window-detection stub) — **execution blocked**: the NDK/SDK host
+  `dl.google.com`/`maven.google.com` is denied by the sandbox network policy. Runs
+  as-is wherever the NDK is reachable. See `app/native/android/README.md`.
+- ⬜ FP-12 iOS xcframework · FP-64 Windows packaging · FP-62/63 store releases
 - ⬜ FP-13 (online half) login round-trip against a live Redmine server
 - ⬜ FP-50 tray · FP-51 global shortcuts · FP-53 timeline/autotracker · FP-55 mobile bg sync · FP-30 parity sweep
 

@@ -1,6 +1,8 @@
 #include "platforminfo.h"
 
-#if defined(__linux)
+// Android is Linux-based but has no X11; its OS details are handled by the
+// inline no-op branch in platforminfo.h.
+#if defined(__linux) && !defined(__ANDROID__)
 
 #include <cstdio>
 #include <fstream>

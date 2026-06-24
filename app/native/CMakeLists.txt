@@ -16,10 +16,41 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # Path to the repo's core sources (this file lives in app/native/).
 get_filename_component(CORE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../src" ABSOLUTE)
 
+# Dependency discovery.
+#  * Desktop (Linux/macOS/Windows): system packages (apt/brew/vcpkg) via
+#    find_package + pkg-config.
+#  * Android: there are no system packages — point CMake at a prefix that holds
+#    the cross-built OpenSSL/Poco/jsoncpp for the current ABI. Produce it with
+#    app/native/android/build-deps.sh and pass -DREDTICK_DEPS_PREFIX=<prefix>
+#    (the Gradle externalNativeBuild does this automatically per ABI).
+# REDTICK_DEPS_ROOT points at a parent dir holding one prefix per ABI
+# (e.g. .deps-prefix/arm64-v8a); the per-ABI prefix is selected here. Gradle
+# passes REDTICK_DEPS_ROOT so a single argument works for all ABIs.
+if(ANDROID AND DEFINED REDTICK_DEPS_ROOT AND NOT DEFINED REDTICK_DEPS_PREFIX)
+    set(REDTICK_DEPS_PREFIX "${REDTICK_DEPS_ROOT}/${ANDROID_ABI}")
+endif()
+if(DEFINED REDTICK_DEPS_PREFIX)
+    list(PREPEND CMAKE_PREFIX_PATH "${REDTICK_DEPS_PREFIX}")
+    list(PREPEND CMAKE_FIND_ROOT_PATH "${REDTICK_DEPS_PREFIX}")
+    set(OPENSSL_ROOT_DIR "${REDTICK_DEPS_PREFIX}")
+endif()
+
 find_package(Poco CONFIG REQUIRED COMPONENTS Crypto DataSQLite NetSSL Foundation Util Net)
 
-include(FindPkgConfig)
-pkg_check_modules(JSONCPP REQUIRED jsoncpp)
+# jsoncpp: prefer its CMake config (used by the Android prefix); fall back to
+# pkg-config on desktop.
+find_package(jsoncpp CONFIG QUIET)
+if(jsoncpp_FOUND)
+    if(TARGET jsoncpp_static)
+        set(JSONCPP_LIBRARIES jsoncpp_static)
+    else()
+        set(JSONCPP_LIBRARIES jsoncpp_lib)
+    endif()
+    set(JSONCPP_INCLUDE_DIRS "")
+else()
+    include(FindPkgConfig)
+    pkg_check_modules(JSONCPP REQUIRED jsoncpp)
+endif()
 
 set(CORE_SOURCES
     util/custom_error_handler.cc
@@ -66,7 +97,9 @@ set(CORE_SOURCES
 )
 
 if(ANDROID)
-    list(APPEND CORE_SOURCES get_focused_window_linux.cc)
+    # Android has no X11; use the no-op window-detection stub instead of the
+    # Linux/X11 implementation (autotracker window detection is desktop-only).
+    set(ANDROID_STUB "${CMAKE_CURRENT_SOURCE_DIR}/android/get_focused_window_android.cc")
 elseif(WIN32)
     list(APPEND CORE_SOURCES get_focused_window_windows.cc)
     set(PLATFORM_LIBS Winhttp Psapi)
@@ -82,6 +115,11 @@ list(TRANSFORM CORE_SOURCES PREPEND "${CORE_SRC}/")
 # FFI bridge shim (FP-22b): deep-copies view structs for thread-safe Dart
 # delivery. Compiled into the same library so rt_* symbols ship alongside toggl_*.
 list(APPEND CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/bridge.c")
+
+# Android window-detection stub (absolute path, added after the prepend).
+if(ANDROID AND DEFINED ANDROID_STUB)
+    list(APPEND CORE_SOURCES "${ANDROID_STUB}")
+endif()
 
 add_library(TogglDesktopLibrary SHARED ${CORE_SOURCES})
 

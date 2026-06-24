@@ -5,7 +5,14 @@
 #include <sstream>
 #include <map>
 
-#if defined(__linux)
+#if defined(__ANDROID__)
+inline void RetrieveOsDetails(std::stringstream &ss) {
+    (void)ss;
+}
+inline std::map<std::string, std::string> RetrieveOsDetailsMap() {
+    return {};
+}
+#elif defined(__linux)
 
 void RetrieveOsDetails(std::stringstream &ss);
 std::map<std::string, std::string> RetrieveOsDetailsMap();

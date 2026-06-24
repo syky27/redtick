@@ -19,10 +19,30 @@ android {
         applicationId = "cz.syky.redtick.redtick"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = maxOf(flutter.minSdkVersion, 24) // core deps target API 24+
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Build the C++ core (FP-11) per ABI via CMake. The native deps
+        // (OpenSSL/Poco/jsoncpp) must be cross-built first with
+        // native/android/build-deps.sh into native/android/.deps-prefix/<abi>.
+        externalNativeBuild {
+            cmake {
+                arguments(
+                    "-DREDTICK_DEPS_ROOT=${projectDir}/../../native/android/.deps-prefix",
+                )
+            }
+        }
+        ndk {
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("../../native/CMakeLists.txt")
+        }
     }
 
     buildTypes {
