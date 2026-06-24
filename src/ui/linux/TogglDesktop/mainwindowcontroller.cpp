@@ -440,16 +440,13 @@ void MainWindowController::connectMenuActions() {
     connect(ui->actionQuit,  &QAction::triggered, this, &MainWindowController::onActionQuit);
     connect(ui->actionHelp,  &QAction::triggered, this, &MainWindowController::onActionHelp);
 
-    // Quit shortcut: Cmd+Q on macOS, Ctrl+Q elsewhere.
-    ui->actionQuit->setShortcut(QKeySequence::Quit);
-#ifdef Q_OS_MAC
-    // Use the native macOS menu bar so Cmd+Q routes to our Quit (real quit, not
-    // hide-to-menubar) and the standard app-menu items — Quit, Hide (Cmd+H),
-    // Hide Others, Show All, About, Preferences — are created and behave right.
-    ui->menuBar->setNativeMenuBar(true);
-    ui->actionQuit->setMenuRole(QAction::QuitRole);
-    ui->actionAbout->setMenuRole(QAction::AboutRole);
-    ui->actionPreferences->setMenuRole(QAction::PreferencesRole);
+    // Keep the in-window menu bar (so the Redtick menu — Settings, Sync,
+    // Calendar, etc. — stays inside the window, not only in the macOS system
+    // menu bar). On macOS, Cmd+Q is handled application-wide (QEvent::Quit ->
+    // quitApp, in main.cpp) and Cmd+H by the standard macOS app menu; giving
+    // the Quit action a shortcut here on macOS would just duplicate Cmd+Q.
+#ifndef Q_OS_MAC
+    ui->actionQuit->setShortcut(QKeySequence::Quit);   // Ctrl+Q on Linux/Windows
 #endif
 
     QMenu *trayMenu = new QMenu(this);
