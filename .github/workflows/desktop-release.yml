@@ -68,6 +68,11 @@ jobs:
       - run: flutter pub get
       - run: flutter config --enable-${{ matrix.target }}-desktop
       - run: flutter build ${{ matrix.target }} --release
+        env:
+          # permission_handler_windows (transitive via live_activities) includes
+          # C++/WinRT's <experimental/coroutine>, rejected as a hard error by the
+          # current MSVC STL (STL1011). cl.exe reads $CL per TU. Ignored elsewhere.
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 
       # ---- Linux: AppImage ----
       - name: Package AppImage

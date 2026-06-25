@@ -102,6 +102,12 @@ jobs:
       - run: flutter pub get
       - run: flutter config --enable-${{ matrix.target }}-desktop
       - run: flutter build ${{ matrix.target }} --release
+        env:
+          # permission_handler_windows (pulled transitively by live_activities)
+          # includes C++/WinRT's <experimental/coroutine>, which the current MSVC
+          # STL rejects as a hard error (STL1011). cl.exe reads $CL for every TU,
+          # so this define silences it. Ignored on Linux/macOS.
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 
       # Quick sanity artifact — the raw self-contained bundle (not the polished
       # installer; those are produced in desktop-release.yml on a tag).
@@ -123,6 +129,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: redtick-${{ matrix.target }}
-          path: app/redtick-*.{tar.gz,zip}
+          # upload-artifact's glob (@actions/glob) has no brace expansion — list
+          # each pattern on its own line. Each leg produces exactly one of these.
+          path: |
+            app/redtick-*.tar.gz
+            app/redtick-*.zip
           if-no-files-found: error
           retention-days: 14
