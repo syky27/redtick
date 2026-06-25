@@ -66,6 +66,13 @@ dev_dependencies:
   # `dart run flutter_native_splash:create` after changing the config/assets.
   flutter_native_splash: ^2.4.1
 
+  # App launcher icons. `tool/generate_icons.dart` (pure-Dart `image`) bakes the
+  # opaque branded masters into `assets/icon/`; `flutter_launcher_icons` fans them
+  # out to every platform per `flutter_launcher_icons.yaml`. Regenerate with:
+  #   dart run tool/generate_icons.dart && dart run flutter_launcher_icons
+  image: ^4.3.0
+  flutter_launcher_icons: ^0.14.4
+
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
