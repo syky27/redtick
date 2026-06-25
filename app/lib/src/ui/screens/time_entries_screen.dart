@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/cupertino.dart' show CupertinoSliverRefreshControl;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -37,34 +40,98 @@ class TimeEntriesScreen extends ConsumerWidget {
   }
 }
 
+/// The day-grouped entry list with a **platform-native** pull-to-refresh on
+/// mobile (Cupertino rubber-band on iOS, Material indicator on Android). Desktop
+/// has no pull gesture — it refreshes from the sidebar button — so it renders a
+/// plain list.
 class _EntryList extends ConsumerWidget {
   const _EntryList({required this.entries});
   final List<TimeEntry> entries;
 
+  Future<void> _refresh(WidgetRef ref) =>
+      ref.read(coreServiceProvider).refresh();
+
+  Widget _tile(BuildContext context, WidgetRef ref, TimeEntry e) {
+    if (e.isHeader) return _DayHeader(entry: e);
+    return TimeEntryTile(
+      entry: e,
+      onContinue: () => ref.read(coreServiceProvider).continueEntry(e.guid),
+      onTap: () => showEntryEditor(context, e),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (entries.isEmpty) {
-      return Center(
-        child: Text('No time entries yet',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-      );
-    }
+    final cs = Theme.of(context).colorScheme;
     final hairline = Theme.of(context).extension<RedtickTokens>()!.hairline;
 
-    return ListView.separated(
-      itemCount: entries.length,
-      separatorBuilder: (_, i) =>
-          entries[i].isHeader ? const SizedBox.shrink() : Divider(height: 1, color: hairline),
-      itemBuilder: (context, i) {
-        final e = entries[i];
-        if (e.isHeader) return _DayHeader(entry: e);
-        return TimeEntryTile(
-          entry: e,
-          onContinue: () => ref.read(coreServiceProvider).continueEntry(e.guid),
-          onTap: () => showEntryEditor(context, e),
+    if (entries.isEmpty) {
+      final empty = Center(
+        child: Text('No time entries yet',
+            style: TextStyle(color: cs.onSurfaceVariant)),
+      );
+      if (Platform.isIOS) {
+        return CustomScrollView(
+          slivers: [
+            CupertinoSliverRefreshControl(onRefresh: () => _refresh(ref)),
+            SliverFillRemaining(hasScrollBody: false, child: empty),
+          ],
         );
-      },
+      }
+      if (Platform.isAndroid) {
+        return RefreshIndicator(
+          onRefresh: () => _refresh(ref),
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              SizedBox(
+                  height: MediaQuery.sizeOf(context).height * 0.6, child: empty),
+            ],
+          ),
+        );
+      }
+      return empty;
+    }
+
+    // iOS: native rubber-band refresh over a sliver list (manual dividers).
+    if (Platform.isIOS) {
+      return CustomScrollView(
+        slivers: [
+          CupertinoSliverRefreshControl(onRefresh: () => _refresh(ref)),
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, i) {
+                final e = entries[i];
+                final divider = !e.isHeader && i < entries.length - 1;
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _tile(context, ref, e),
+                    if (divider) Divider(height: 1, color: hairline),
+                  ],
+                );
+              },
+              childCount: entries.length,
+            ),
+          ),
+        ],
+      );
+    }
+
+    final list = ListView.separated(
+      physics:
+          Platform.isAndroid ? const AlwaysScrollableScrollPhysics() : null,
+      itemCount: entries.length,
+      separatorBuilder: (_, i) => entries[i].isHeader
+          ? const SizedBox.shrink()
+          : Divider(height: 1, color: hairline),
+      itemBuilder: (context, i) => _tile(context, ref, entries[i]),
     );
+    // Android: Material drop-down indicator. Desktop: plain list (sidebar button).
+    if (Platform.isAndroid) {
+      return RefreshIndicator(onRefresh: () => _refresh(ref), child: list);
+    }
+    return list;
   }
 }
 

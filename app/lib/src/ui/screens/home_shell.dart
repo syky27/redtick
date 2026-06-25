@@ -82,7 +82,6 @@ class _Sidebar extends ConsumerWidget {
     final t = Theme.of(context).extension<RedtickTokens>()!;
     final cs = Theme.of(context).colorScheme;
     final core = ref.watch(coreServiceProvider);
-    final online = ref.watch(onlineStateProvider).asData?.value ?? 0;
 
     return Container(
       width: 232,
@@ -101,11 +100,9 @@ class _Sidebar extends ConsumerWidget {
                 child: const RedtickLogo(size: 30, wordmark: true),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: _InstanceChip(
-                  host: core.host.isEmpty ? 'redmine' : core.host,
-                  online: online),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: _InstanceChip(),
             ),
             const SizedBox(height: 14),
             for (var i = 0; i < destinations.length; i++)
@@ -161,18 +158,41 @@ class _Sidebar extends ConsumerWidget {
   }
 }
 
-class _InstanceChip extends StatelessWidget {
-  const _InstanceChip({required this.host, required this.online});
-  final String host;
-  final int online;
+/// The sidebar connection chip (desktop): host + "Synced · Ns ago" status and a
+/// manual refresh button (desktop has no pull-to-refresh). Design comp §3.1.
+class _InstanceChip extends ConsumerStatefulWidget {
+  const _InstanceChip();
+
+  @override
+  ConsumerState<_InstanceChip> createState() => _InstanceChipState();
+}
+
+class _InstanceChipState extends ConsumerState<_InstanceChip> {
+  bool _busy = false;
+
+  Future<void> _refresh() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(coreServiceProvider).refresh();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).extension<RedtickTokens>()!;
     final cs = Theme.of(context).colorScheme;
+    final core = ref.watch(coreServiceProvider);
+    final online = ref.watch(onlineStateProvider).asData?.value ?? 0;
+    final lastSync = ref.watch(syncStateProvider).asData?.value;
     final ok = online == 0;
+    final host = core.host.isEmpty ? 'redmine' : core.host;
+    final status = ok ? 'Synced · ${_ago(lastSync)}' : 'Offline';
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: const EdgeInsets.fromLTRB(12, 9, 9, 9),
       decoration: BoxDecoration(
         color: cs.surface,
         borderRadius: BorderRadius.circular(10),
@@ -200,7 +220,7 @@ class _InstanceChip extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                     ),
-                    Text(ok ? 'Connected' : 'Offline',
+                    Text(status,
                         style:
                             TextStyle(color: cs.onSurfaceVariant, fontSize: 11)),
                   ],
@@ -208,10 +228,46 @@ class _InstanceChip extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(width: 8),
+          Tooltip(
+            message: 'Refresh',
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _busy ? null : _refresh,
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: t.hairline),
+                  ),
+                  child: _busy
+                      ? const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : Icon(Icons.refresh, size: 17, color: cs.onSurfaceVariant),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
+}
+
+/// Short relative time for the sync chip ("just now" / "Ns ago" / …).
+String _ago(DateTime? t) {
+  if (t == null) return 'just now';
+  final d = DateTime.now().difference(t);
+  if (d.inSeconds < 5) return 'just now';
+  if (d.inSeconds < 60) return '${d.inSeconds}s ago';
+  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+  if (d.inHours < 24) return '${d.inHours}h ago';
+  return '${d.inDays}d ago';
 }
 
 class _NavItem extends StatelessWidget {

@@ -52,6 +52,15 @@ final onlineStateProvider = StreamProvider<int>(
   (ref) => ref.watch(coreServiceProvider).onlineState,
 );
 
+/// Timestamp of the last successful sync (drives the desktop "Synced · Ns ago"
+/// indicator). Replays the last value for late subscribers.
+final syncStateProvider = StreamProvider<DateTime?>((ref) async* {
+  final core = ref.watch(coreServiceProvider);
+  final last = core.lastSyncedAt;
+  if (last != null) yield last;
+  yield* core.syncEvents;
+});
+
 /// Reminder notices (FP-54).
 final remindersProvider = StreamProvider<Notice>(
   (ref) => ref.watch(coreServiceProvider).reminders,

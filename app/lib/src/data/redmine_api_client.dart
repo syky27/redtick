@@ -75,6 +75,9 @@ class RedmineApiClient {
           'Host redirected (${resp.statusCode}) — use the exact Redmine URL '
           '(no redirect).');
     }
+    if (resp.statusCode == 404) {
+      throw RedmineException.notFound('Not found: $relativeUrl');
+    }
     if (resp.statusCode >= 400) {
       throw RedmineException('Redmine HTTP ${resp.statusCode} for $relativeUrl');
     }
@@ -148,6 +151,20 @@ class RedmineApiClient {
         'issues',
         maxItems: maxCachedIssues,
       );
+
+  /// `GET /time_entries/{id}.json` → the `time_entry` object, or `null` when it
+  /// no longer exists (404 — e.g. deleted on another device). Used by the
+  /// running-timer poll to cheaply detect a remote stop/delete.
+  Future<Map<String, dynamic>?> timeEntry(int id) async {
+    try {
+      final root = await _getJson('/time_entries/$id.json');
+      final te = root['time_entry'];
+      return te is Map<String, dynamic> ? te : null;
+    } on RedmineException catch (e) {
+      if (e.kind == RedmineErrorKind.notFound) return null;
+      rethrow;
+    }
+  }
 
   /// My time entries within the retention window.
   Future<List<Map<String, dynamic>>> recentTimeEntries() {
@@ -329,7 +346,7 @@ class RedmineApiClient {
   static String _two(int n) => n.toString().padLeft(2, '0');
 }
 
-enum RedmineErrorKind { generic, auth, network }
+enum RedmineErrorKind { generic, auth, network, notFound }
 
 /// A Redmine API failure, carrying a kind so the service can map it to the
 /// right `onlineState` / inline error.
@@ -337,6 +354,7 @@ class RedmineException implements Exception {
   RedmineException(this.message, [this.kind = RedmineErrorKind.generic]);
   RedmineException.auth(this.message) : kind = RedmineErrorKind.auth;
   RedmineException.network(this.message) : kind = RedmineErrorKind.network;
+  RedmineException.notFound(this.message) : kind = RedmineErrorKind.notFound;
 
   final String message;
   final RedmineErrorKind kind;

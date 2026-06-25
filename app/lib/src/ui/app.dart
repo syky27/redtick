@@ -82,7 +82,48 @@ class _AuthGate extends ConsumerWidget {
 
     final loggedIn = ref.watch(isLoggedInProvider);
     return loggedIn
-        ? const IdleWatcher(child: ReminderWatcher(child: HomeShell()))
+        ? const IdleWatcher(
+            child: ReminderWatcher(
+              child: _LifecycleRefresher(child: HomeShell()),
+            ),
+          )
         : const LoginScreen();
   }
+}
+
+/// Reconciles with Redmine when the app returns to the foreground, so a timer
+/// stopped/started on another device is reflected immediately (the periodic
+/// poll covers the steady state). See `RedmineService.refresh`.
+class _LifecycleRefresher extends ConsumerStatefulWidget {
+  const _LifecycleRefresher({required this.child});
+  final Widget child;
+
+  @override
+  ConsumerState<_LifecycleRefresher> createState() =>
+      _LifecycleRefresherState();
+}
+
+class _LifecycleRefresherState extends ConsumerState<_LifecycleRefresher>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.read(coreServiceProvider).refresh(silent: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

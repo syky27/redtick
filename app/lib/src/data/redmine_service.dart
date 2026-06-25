@@ -118,6 +118,9 @@ class RedmineService {
   List<_Entry> _recent = const [];
   _RunningEntry? _running;
   Timer? _ticker;
+  Timer? _poll; // periodic cross-device reconcile (running stop / remote start)
+  bool _refreshing = false; // re-entrancy guard for refresh()
+  DateTime? _lastSyncedAt;
   bool _disposed = false;
 
   /// Add to a stream only while alive — pending async (login/refresh/ticker) can
@@ -136,6 +139,7 @@ class RedmineService {
   final _reminders = StreamController<Notice>.broadcast();
   final _pomodoro = StreamController<Notice>.broadcast();
   final _idle = StreamController<IdleNotice>.broadcast();
+  final _syncEvents = StreamController<DateTime>.broadcast();
 
   LoginEvent? _lastLogin;
   List<TimeEntry>? _lastTimeEntries;
@@ -150,6 +154,13 @@ class RedmineService {
   Stream<Notice> get reminders => _reminders.stream;
   Stream<Notice> get pomodoro => _pomodoro.stream;
   Stream<IdleNotice> get idle => _idle.stream;
+
+  /// Emits the timestamp of each successful refresh (drives the desktop
+  /// "Synced · Ns ago" indicator).
+  Stream<DateTime> get syncEvents => _syncEvents.stream;
+
+  /// When the account set was last successfully pulled (null until first sync).
+  DateTime? get lastSyncedAt => _lastSyncedAt;
 
   /// Replayed for late subscribers (the UI subscribes after startup events).
   LoginEvent? get currentLogin => _lastLogin;
@@ -251,6 +262,7 @@ class RedmineService {
       await _persist();
       _emitLogin(loggedIn: true, userId: _userId);
       await refresh();
+      _startPoll(); // cross-device reconcile while logged in
     } on RedmineException catch (e) {
       _reportError(e);
     } catch (e) {
@@ -264,6 +276,7 @@ class RedmineService {
   }
 
   bool logout() {
+    _stopPoll();
     _api?.dispose();
     _api = null;
     _apiKey = '';
@@ -278,9 +291,15 @@ class RedmineService {
   }
 
   /// Re-pull the account set and rebuild the list + running-timer state.
-  Future<void> refresh() async {
+  ///
+  /// [silent] (used by the background poll) suppresses the user-facing error
+  /// toast on failure — only `onlineState` is updated — so transient poll
+  /// errors don't spam the UI.
+  Future<void> refresh({bool silent = false}) async {
     final api = _api;
     if (api == null) return;
+    if (_refreshing) return; // avoid overlapping pulls mutating the shared maps
+    _refreshing = true;
     try {
       final projects = await api.projects();
       final issues = await api.myOpenIssues();
@@ -304,10 +323,61 @@ class RedmineService {
 
       _rebuild(entries);
       _emit(_onlineState, 0);
+      _markSynced();
       await _flushQueue(api); // network is back → replay any queued writes
     } on RedmineException catch (e) {
-      _reportError(e);
+      if (silent) {
+        if (e.kind == RedmineErrorKind.network) _emit(_onlineState, 1);
+      } else {
+        _reportError(e);
+      }
+    } finally {
+      _refreshing = false;
     }
+  }
+
+  void _markSynced() {
+    _lastSyncedAt = DateTime.now();
+    _emit(_syncEvents, _lastSyncedAt!);
+  }
+
+  /// Periodic cross-device reconcile. While a confirmed timer runs, cheaply
+  /// check just that entry (`GET /time_entries/{id}`) and only do a full pull if
+  /// it was stopped/deleted elsewhere; when idle, a full pull catches a timer
+  /// started on another device. Always silent (no toast on transient errors).
+  Future<void> _pollTick() async {
+    if (_disposed || _refreshing) return;
+    final api = _api;
+    if (api == null) return;
+    final r = _running;
+    if (r != null && r.redmineId != null) {
+      try {
+        final te = await api.timeEntry(r.redmineId!);
+        final mapped = te == null ? null : _mapEntry(te);
+        if (mapped == null || !mapped.running) {
+          // Stopped or deleted elsewhere → full reconcile clears _running.
+          await refresh(silent: true);
+        } else {
+          _emit(_onlineState, 0); // confirmed reachable; keep ticking locally
+        }
+      } on RedmineException catch (e) {
+        if (e.kind == RedmineErrorKind.network) _emit(_onlineState, 1);
+      }
+    } else {
+      // Idle (or a just-started timer with no server id yet): a full pull picks
+      // up a remote start; _reconcileRunning guards an in-flight local start.
+      await refresh(silent: true);
+    }
+  }
+
+  void _startPoll() {
+    if (_disposed) return;
+    _poll ??= Timer.periodic(const Duration(seconds: 30), (_) => _pollTick());
+  }
+
+  void _stopPoll() {
+    _poll?.cancel();
+    _poll = null;
   }
 
   /// Replay queued offline writes, then re-pull once if anything synced.
@@ -1068,6 +1138,7 @@ class RedmineService {
         break;
       case RedmineErrorKind.auth:
       case RedmineErrorKind.generic:
+      case RedmineErrorKind.notFound:
         break;
     }
     _emit(_errors, CoreError(message: e.message, userError: true));
@@ -1103,6 +1174,7 @@ class RedmineService {
     _disposed = true;
     _running = null;
     _stopTicker();
+    _stopPoll();
     _api?.dispose();
     _timeEntries.close();
     _showLoadMore.close();
@@ -1113,6 +1185,7 @@ class RedmineService {
     _reminders.close();
     _pomodoro.close();
     _idle.close();
+    _syncEvents.close();
   }
 
   String _colorFor(int projectId) {
