@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/redmine_service.dart';
 import '../models/time_entry.dart';
+import '../platform/notifications.dart';
 
 /// Holds the live [RedmineService] (the pure-Dart backend that replaced the FFI
 /// `CoreService`). Overridden in `main()` after `RedmineService.create()`.
@@ -71,3 +72,8 @@ final isLoggedInProvider = Provider<bool>((ref) {
   final login = ref.watch(loginStateProvider).asData?.value;
   return login?.loggedIn ?? false;
 });
+
+/// OS-notification presenter (real banners via flutter_local_notifications,
+/// logging fallback). Shared by `_AuthGate` and the reminder watcher.
+final notificationPresenterProvider =
+    Provider<NotificationPresenter>((ref) => NotificationPresenter.defaultFor());

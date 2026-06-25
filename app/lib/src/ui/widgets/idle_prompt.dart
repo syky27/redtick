@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/time_entry.dart';
 import '../../platform/idle.dart';
+import '../../state/idle_settings.dart';
 import '../../state/providers.dart';
 import '../theme.dart';
 import 'entry_bits.dart';
@@ -24,7 +25,6 @@ class IdleWatcher extends ConsumerStatefulWidget {
 }
 
 class _IdleWatcherState extends ConsumerState<IdleWatcher> {
-  static const _thresholdSec = 600; // 10 minutes
   Timer? _timer;
   bool _armed = true;
   bool _showing = false;
@@ -45,17 +45,23 @@ class _IdleWatcherState extends ConsumerState<IdleWatcher> {
 
   Future<void> _check() async {
     if (_showing || !mounted) return;
+    final settings = ref.read(idleSettingsProvider);
+    if (!settings.enabled) {
+      _armed = true; // detection off → nothing to do (re-arm for when re-enabled)
+      return;
+    }
+    final thresholdSec = settings.minutes * 60;
     final running = ref.read(timerStateProvider).asData?.value;
     if (running == null || !running.isRunning) {
       _armed = true;
       return;
     }
     final idle = await IdleDetector.seconds();
-    if (idle < _thresholdSec / 2) {
+    if (idle < thresholdSec / 2) {
       _armed = true; // user is active again → re-arm
       return;
     }
-    if (idle < _thresholdSec || !_armed || !mounted) return;
+    if (idle < thresholdSec || !_armed || !mounted) return;
 
     _armed = false;
     _showing = true;

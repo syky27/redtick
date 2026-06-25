@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../platform/live_timer.dart';
-import '../platform/notifications.dart';
 import '../state/providers.dart';
 import '../state/theme_mode.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'theme.dart';
 import 'widgets/idle_prompt.dart';
+import 'widgets/reminder_watcher.dart';
 
 /// Root widget. Routes between the login screen and the main shell based on the
 /// core's login state, and wires global error toasts. Implements FP-40 (shell).
@@ -27,9 +27,6 @@ class RedtickApp extends ConsumerWidget {
     );
   }
 }
-
-final _notificationPresenterProvider =
-    Provider<NotificationPresenter>((ref) => NotificationPresenter.defaultFor());
 
 final _liveTimerProvider =
     Provider<LiveTimerController>((ref) => LiveTimerController.defaultFor());
@@ -52,7 +49,7 @@ class _AuthGate extends ConsumerWidget {
     });
 
     // Reminder + pomodoro notices: in-app banner + platform notification (FP-54).
-    final presenter = ref.read(_notificationPresenterProvider);
+    final presenter = ref.read(notificationPresenterProvider);
     ref.listen(remindersProvider, (_, next) {
       final n = next.asData?.value;
       if (n != null) {
@@ -85,7 +82,7 @@ class _AuthGate extends ConsumerWidget {
 
     final loggedIn = ref.watch(isLoggedInProvider);
     return loggedIn
-        ? const IdleWatcher(child: HomeShell())
+        ? const IdleWatcher(child: ReminderWatcher(child: HomeShell()))
         : const LoginScreen();
   }
 }

@@ -1,7 +1,11 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../state/idle_settings.dart';
 import '../../state/providers.dart';
+import '../../state/reminder_settings.dart';
 import '../../state/theme_mode.dart';
 import '../theme.dart';
 
@@ -13,7 +17,11 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final core = ref.watch(coreServiceProvider);
     final mode = ref.watch(themeModeProvider);
+    final idle = ref.watch(idleSettingsProvider);
+    final rem = ref.watch(reminderSettingsProvider);
     final cs = Theme.of(context).colorScheme;
+    final isDesktop =
+        Platform.isMacOS || Platform.isWindows || Platform.isLinux;
 
     return ColoredBox(
       color: cs.surface,
@@ -98,6 +106,57 @@ class SettingsScreen extends ConsumerWidget {
               subtitle: 'Used for new entries',
               trailing: _ActivityDropdown(),
             ),
+
+            // --- Idle detection (desktop only; idle input isn't tracked on
+            // mobile, so the controls are hidden there) ---
+            if (isDesktop) ...[
+              const SizedBox(height: 24),
+              const _SectionHeader('Idle detection'),
+              _Row(
+                title: 'Enable idle detection',
+                subtitle: 'Prompt to keep or discard idle time while tracking',
+                trailing: Switch(
+                  value: idle.enabled,
+                  onChanged: (v) =>
+                      ref.read(idleSettingsProvider.notifier).setEnabled(v),
+                ),
+              ),
+              _Row(
+                title: 'Idle threshold',
+                subtitle: 'Minutes of inactivity before prompting',
+                trailing: _MinutesStepper(
+                  value: idle.minutes,
+                  enabled: idle.enabled,
+                  onChanged: (v) =>
+                      ref.read(idleSettingsProvider.notifier).setMinutes(v),
+                ),
+              ),
+            ],
+
+            // --- Reminders (all platforms) ---
+            const SizedBox(height: 24),
+            const _SectionHeader('Reminders'),
+            _Row(
+              title: 'Remind me to track time',
+              subtitle: 'Notify when no timer is running',
+              trailing: Switch(
+                value: rem.enabled,
+                onChanged: (v) =>
+                    ref.read(reminderSettingsProvider.notifier).setEnabled(v),
+              ),
+            ),
+            _Row(
+              title: 'Remind every',
+              subtitle: 'Minutes between reminders',
+              trailing: _MinutesStepper(
+                value: rem.minutes,
+                enabled: rem.enabled,
+                onChanged: (v) =>
+                    ref.read(reminderSettingsProvider.notifier).setMinutes(v),
+              ),
+            ),
+            _WeekdayChips(enabled: rem.enabled),
+            _TimeWindowRow(enabled: rem.enabled),
           ],
         ),
       ),
@@ -187,6 +246,293 @@ class _ActivityDropdown extends ConsumerWidget {
         },
       ),
     );
+  }
+}
+
+/// A compact "− N min +" stepper for minute-valued settings (clamped 1..999).
+class _MinutesStepper extends StatelessWidget {
+  const _MinutesStepper({
+    required this.value,
+    required this.onChanged,
+    this.enabled = true,
+  });
+  final int value;
+  final ValueChanged<int> onChanged;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _StepButton(
+          icon: Icons.remove,
+          enabled: enabled && value > 1,
+          onTap: () => onChanged(value - 1),
+        ),
+        SizedBox(
+          width: 60,
+          child: Text(
+            '$value min',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+              color: enabled
+                  ? null
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        _StepButton(
+          icon: Icons.add,
+          enabled: enabled && value < 999,
+          onTap: () => onChanged(value + 1),
+        ),
+      ],
+    );
+  }
+}
+
+class _StepButton extends StatelessWidget {
+  const _StepButton(
+      {required this.icon, required this.onTap, required this.enabled});
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).extension<RedtickTokens>()!;
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: t.hairline),
+        ),
+        child: Icon(icon,
+            size: 18,
+            color: enabled ? cs.onSurface : cs.onSurfaceVariant.withValues(alpha: 0.4)),
+      ),
+    );
+  }
+}
+
+/// Weekday toggles (Mon–Sun) for the reminder's active days. Greyed out when
+/// the reminder is off.
+class _WeekdayChips extends ConsumerWidget {
+  const _WeekdayChips({required this.enabled});
+  final bool enabled;
+
+  static const _labels = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).extension<RedtickTokens>()!;
+    final rem = ref.watch(reminderSettingsProvider);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.hairline)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Active days',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+          const SizedBox(height: 2),
+          Text('Only remind on selected weekdays',
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12.5)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (var d = 1; d <= 7; d++) ...[
+                _DayChip(
+                  label: _labels[d - 1],
+                  selected: rem.weekdays.contains(d),
+                  enabled: enabled,
+                  onTap: () => ref
+                      .read(reminderSettingsProvider.notifier)
+                      .toggleWeekday(d, !rem.weekdays.contains(d)),
+                ),
+                if (d < 7) const SizedBox(width: 8),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DayChip extends StatelessWidget {
+  const _DayChip({
+    required this.label,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).extension<RedtickTokens>()!;
+    final on = selected && enabled;
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 36,
+        height: 36,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: on ? cs.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: on ? cs.primary : t.hairline),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: on
+                ? cs.onPrimary
+                : (enabled
+                    ? cs.onSurface
+                    : cs.onSurfaceVariant.withValues(alpha: 0.4)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The reminder's active-hours window (optional). Tapping a pill opens a time
+/// picker; the × clears that edge (no bound). Greyed out when the reminder is
+/// off.
+class _TimeWindowRow extends ConsumerWidget {
+  const _TimeWindowRow({required this.enabled});
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).extension<RedtickTokens>()!;
+    final rem = ref.watch(reminderSettingsProvider);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.hairline)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Active hours',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+          const SizedBox(height: 2),
+          Text('Only remind during this window (optional)',
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12.5)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _TimePill(
+                label: 'From',
+                value: rem.startHHmm,
+                enabled: enabled,
+                onPick: (v) =>
+                    ref.read(reminderSettingsProvider.notifier).setStart(v),
+              ),
+              const SizedBox(width: 12),
+              _TimePill(
+                label: 'To',
+                value: rem.endHHmm,
+                enabled: enabled,
+                onPick: (v) =>
+                    ref.read(reminderSettingsProvider.notifier).setEnd(v),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimePill extends StatelessWidget {
+  const _TimePill({
+    required this.label,
+    required this.value,
+    required this.enabled,
+    required this.onPick,
+  });
+  final String label;
+  final String? value;
+  final bool enabled;
+  final ValueChanged<String?> onPick; // null clears the bound
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).extension<RedtickTokens>()!;
+    final hasValue = value != null && value!.isNotEmpty;
+    return InkWell(
+      onTap: enabled ? () => _pick(context) : null,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: t.hairline),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('$label  ',
+                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12.5)),
+            Text(
+              hasValue ? value! : 'Any',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+                color: enabled
+                    ? cs.onSurface
+                    : cs.onSurfaceVariant.withValues(alpha: 0.4),
+              ),
+            ),
+            if (hasValue && enabled) ...[
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: () => onPick(null),
+                child: Icon(Icons.close,
+                    size: 15, color: cs.onSurfaceVariant),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pick(BuildContext context) async {
+    final mins = minutesOfDay(value);
+    final init = mins != null
+        ? TimeOfDay(hour: mins ~/ 60, minute: mins % 60)
+        : const TimeOfDay(hour: 9, minute: 0);
+    final picked = await showTimePicker(context: context, initialTime: init);
+    if (picked == null) return;
+    final hh = picked.hour.toString().padLeft(2, '0');
+    final mm = picked.minute.toString().padLeft(2, '0');
+    onPick('$hh:$mm');
   }
 }
 
