@@ -32,6 +32,9 @@ class _ReminderWatcherState extends ConsumerState<ReminderWatcher> {
   void initState() {
     super.initState();
     _lastReminder = DateTime.now();
+    // Request OS notification permission up front so the reminder surfaces as a
+    // system notification (not just the in-app fallback) when it first fires.
+    ref.read(notificationPresenterProvider).init();
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => _tick());
   }
 
@@ -41,7 +44,7 @@ class _ReminderWatcherState extends ConsumerState<ReminderWatcher> {
     super.dispose();
   }
 
-  void _tick() {
+  Future<void> _tick() async {
     if (!mounted) return;
     final settings = ref.read(reminderSettingsProvider);
     final running = ref.read(timerStateProvider).asData?.value;
@@ -64,9 +67,15 @@ class _ReminderWatcherState extends ConsumerState<ReminderWatcher> {
     _lastReminder = now;
     const title = 'Redtick';
     const body = 'No timer running — track your time?';
-    ref.read(notificationPresenterProvider).show(title, body);
-    ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(const SnackBar(content: Text('$title — $body')));
+    // Prefer the OS notification (corner banner); fall back to the in-app banner
+    // only when it wasn't delivered (permission denied / unsupported platform).
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final delivered =
+        await ref.read(notificationPresenterProvider).show(title, body);
+    if (!delivered && mounted) {
+      messenger?.showSnackBar(
+          const SnackBar(content: Text('$title — $body')));
+    }
   }
 
   @override

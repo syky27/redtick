@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -67,37 +68,51 @@ class ProjectDot extends StatelessWidget {
 }
 
 /// `#issue · project` where the `#issue` is a clickable link to Redmine.
-class EntrySubline extends ConsumerWidget {
+///
+/// Rendered as a single [Text.rich] (not a `Row`) so the `#issue` + ` · project`
+/// flow as one ellipsizable line — nested min-size flex rows hit a sub-pixel
+/// overflow when width is tight (the `RenderFlex overflowed by 0.03 px` warning).
+class EntrySubline extends ConsumerStatefulWidget {
   const EntrySubline({super.key, required this.entry});
   final TimeEntry entry;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<EntrySubline> createState() => _EntrySublineState();
+}
+
+class _EntrySublineState extends ConsumerState<EntrySubline> {
+  final _tap = TapGestureRecognizer();
+
+  @override
+  void dispose() {
+    _tap.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final muted = TextStyle(color: cs.onSurfaceVariant, fontSize: 12.5);
-    final num = issueNumber(entry);
-    final proj = entry.projectLabel;
+    final num = issueNumber(widget.entry);
+    final proj = widget.entry.projectLabel;
 
     if (num == 0) {
       return Text(proj,
           maxLines: 1, overflow: TextOverflow.ellipsis, style: muted);
     }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        InkWell(
-          onTap: () => openIssue(ref, num),
-          borderRadius: BorderRadius.circular(4),
-          child: Text('#$num',
-              style: muted.copyWith(
-                  color: cs.primary, fontWeight: FontWeight.w600)),
+    _tap.onTap = () => openIssue(ref, num);
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(
+          text: '#$num',
+          style:
+              muted.copyWith(color: cs.primary, fontWeight: FontWeight.w600),
+          recognizer: _tap,
         ),
-        if (proj.isNotEmpty)
-          Flexible(
-            child: Text(' · $proj',
-                maxLines: 1, overflow: TextOverflow.ellipsis, style: muted),
-          ),
-      ],
+        if (proj.isNotEmpty) TextSpan(text: ' · $proj', style: muted),
+      ]),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }

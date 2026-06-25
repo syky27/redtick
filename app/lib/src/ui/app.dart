@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/time_entry.dart';
 import '../platform/live_timer.dart';
+import '../platform/notifications.dart';
 import '../state/multi_task_settings.dart';
 import '../state/providers.dart';
 import '../state/theme_mode.dart';
@@ -57,6 +58,19 @@ class _AuthGate extends ConsumerWidget {
         ?.showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// Deliver a notice as an OS notification (corner banner); fall back to the
+  /// in-app banner only when it wasn't delivered (denied / unsupported platform).
+  void _notify(BuildContext context, NotificationPresenter presenter,
+      String title, String body) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    presenter.show(title, body).then((delivered) {
+      if (!delivered) {
+        messenger
+            ?.showSnackBar(SnackBar(content: Text('$title $body'.trim())));
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // Surface core errors as snackbars globally.
@@ -65,21 +79,16 @@ class _AuthGate extends ConsumerWidget {
       if (err != null) _toast(context, err.message);
     });
 
-    // Reminder + pomodoro notices: in-app banner + platform notification (FP-54).
+    // Reminder + pomodoro notices: OS notification, in-app banner only as a
+    // fallback when it wasn't delivered (FP-54).
     final presenter = ref.read(notificationPresenterProvider);
     ref.listen(remindersProvider, (_, next) {
       final n = next.asData?.value;
-      if (n != null) {
-        presenter.show(n.title, n.body);
-        _toast(context, '${n.title} ${n.body}'.trim());
-      }
+      if (n != null) _notify(context, presenter, n.title, n.body);
     });
     ref.listen(pomodoroProvider, (_, next) {
       final n = next.asData?.value;
-      if (n != null) {
-        presenter.show(n.title, n.body);
-        _toast(context, '${n.title} ${n.body}'.trim());
-      }
+      if (n != null) _notify(context, presenter, n.title, n.body);
     });
 
     // Live surfaces (iOS Live Activity / Android Live Update): one timer shows
