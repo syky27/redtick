@@ -1,56 +1,62 @@
 # Redtick — Flutter app
 
-One Flutter codebase (iOS, Android, macOS, Windows, Linux) over the existing C++
-core (`../src`), bound via `dart:ffi`. See `../docs/flutter-port/` for the full
-plan, ADR, and platform-feature notes.
+One Flutter codebase (iOS, Android, macOS, Windows, Linux) talking to **Redmine
+directly over HTTP** — no native core. The Redmine REST contract is documented in
+`../docs/flutter-port/REDMINE_API_CONTRACT.md`; the broader port notes live under
+`../docs/flutter-port/`.
 
 ## Architecture
 
 ```
-../src                         C++ core (unchanged) → libTogglDesktopLibrary
-app/native/CMakeLists.txt      builds the core as a shared lib per platform (FP-10/60)
-app/native/bridge.{h,c}        thread-safe deep-copy shim for struct callbacks (FP-22b)
-app/lib/src/native/            FFI: bindings, CoreService (streams), rt bridge, cacert
-app/lib/src/models/            Dart models mirroring the core view structs
-app/lib/src/state/             Riverpod providers + per-platform DB path
-app/lib/src/ui/                screens (login, timer, list, editor, calendar, settings)
-app/lib/src/platform/          notifications + platform-feature hooks (Phase 5)
+lib/src/data/        Pure-Dart Redmine backend (RedmineApiClient + RedmineService)
+lib/src/models/      Dart models (TimeEntry, account, …)
+lib/src/state/       Riverpod providers + per-platform settings/storage
+lib/src/ui/          screens (login, timer, list, editor, calendar, settings) + widgets
+lib/src/platform/    notifications, live activity, background reconcile hooks
 ```
 
-The C core pushes data through `toggl_on_*` callbacks → `CoreService` exposes them
-as Dart streams → Riverpod providers → widgets. Actions call `toggl_*` functions.
+The service polls/writes Redmine time entries (running timer = an entry with the
+`toggl_start`/`toggl_stop`/`toggl_guid` custom fields) and exposes the state as Dart
+streams → Riverpod providers → widgets. The API key is kept in the OS keychain via
+`flutter_secure_storage`; offline writes are queued and retried.
 
 ## Prerequisites
 
-- Flutter stable (3.44+).
-- Core build deps:
-  - **Linux:** `libpoco-dev libjsoncpp-dev libssl-dev libxmu-dev libx11-dev cmake ninja-build libgtk-3-dev`
-  - **macOS/iOS:** Poco/OpenSSL/jsoncpp via the xcframework toolchain (FP-12).
-  - **Android:** NDK cross-build of the core + deps (FP-11).
-  - **Windows:** Poco/OpenSSL/jsoncpp + the core DLL (FP-64).
+- Flutter stable (developed against **3.44.3**; the same version is pinned in CI).
+- **Linux desktop** build deps: `clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev`.
+- **macOS/Windows**: just the standard Flutter desktop toolchain (Xcode / Visual
+  Studio "Desktop development with C++").
 
 ## Build & run
 
 ```bash
-# 1. (desktop) build + run — the linux CMake builds & bundles the core automatically
 flutter pub get
-flutter run -d linux            # or macos / windows
+flutter run -d macos            # or windows / linux / chrome / a device
 
-# 2. regenerate the full FFI bindings from the C header
-dart run ffigen --config ffigen.yaml
-
-# 3. analyze + test
 flutter analyze
-flutter test                    # ffi_smoke_test skips unless REDTICK_CORE_LIB is set
+flutter test                    # the full suite under test/ (pure Dart)
 
-# 4. run the real FFI test against a built core
-cmake -S native -B ../build/native -DCMAKE_BUILD_TYPE=Release && cmake --build ../build/native -j
-REDTICK_CORE_LIB=../build/native/libTogglDesktopLibrary.so flutter test test/ffi_smoke_test.dart
+flutter build macos --release   # or windows / linux
 ```
+
+## CI / releases
+
+GitHub Actions live in `../.github/workflows/`:
+
+- **`desktop-ci.yml`** — on every push/PR: `flutter analyze` + `flutter test`, then a
+  release-mode build on macOS, Windows, and Linux (uploads a raw bundle as a sanity
+  artifact).
+- **`desktop-release.yml`** — on a `v*` tag (or manual dispatch): builds and packages
+  a polished installer per platform — **Linux AppImage**, **macOS `.dmg`**, **Windows
+  Inno Setup `.exe`** — and attaches them to a draft GitHub Release. Packaging inputs
+  live in `packaging/` (`linux/redtick.desktop`, `linux/AppRun`, `windows/redtick.iss`).
+
+The release artifacts are **unsigned** for now (documented Gatekeeper/SmartScreen
+workarounds in the release notes); code signing/notarization is a planned follow-up.
 
 ## Notes
 
-- TLS: a CA bundle (`assets/cacert.pem`) is materialized at runtime and passed to
-  the core (`toggl_set_cacert_path`).
-- The core must be built **without** `UNICODE` so `char_t == char` (UTF-8) on all
-  platforms, including Windows (see ADR-0001).
+- App launcher icons and the cold-start splash are generated from
+  `assets/icon/` + `assets/splash/`. Regenerate with
+  `dart run tool/generate_icons.dart && dart run flutter_launcher_icons` and
+  `dart run flutter_native_splash:create`.

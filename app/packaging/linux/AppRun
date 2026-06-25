@@ -1,0 +1,5 @@
+#!/bin/sh
+# AppImage entrypoint. Launch the bundled Flutter binary, resolving its data/ and
+# lib/ siblings relative to its own location (Flutter handles that internally).
+HERE="$(dirname "$(readlink -f "${0}")")"
+exec "${HERE}/usr/bin/redtick" "$@"

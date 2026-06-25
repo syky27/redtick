@@ -1,0 +1,128 @@
+# CI for the pure-Dart `redtick` Flutter desktop app.
+# On every push/PR: analyze + the full test suite once, then a release-mode
+# desktop build on each of macOS / Windows / Linux to catch build breaks early.
+# (Polished installers + GitHub Releases live in desktop-release.yml.)
+name: desktop-ci
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'app/**'
+      - '.github/workflows/desktop-ci.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/desktop-ci.yml'
+
+# Cancel an in-flight run when the same ref is pushed again (saves macOS minutes).
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pin the SDK so a mid-week Flutter stable can't silently change analyzer/lint
+  # results or break a plugin. Matches the local toolchain; bump deliberately.
+  FLUTTER_VERSION: 3.44.3
+
+jobs:
+  # Analyze + the full test suite once, on the cheapest runner. The app is pure
+  # Dart, so these are platform-independent — no need to repeat per OS.
+  analyze-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: |
+            pub-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  # Release-mode desktop build per native OS. Same shape everywhere; only the
+  # runner, the Linux apt step, and the build subcommand differ.
+  build:
+    name: build-${{ matrix.target }}
+    needs: analyze-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04   # older glibc => the artifact runs on more distros
+            target: linux
+          - os: macos-14       # Apple Silicon
+            target: macos
+          - os: windows-latest
+            target: windows
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux desktop build deps
+        if: matrix.target == 'linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.os == 'Windows' && '~\AppData\Local\Pub\Cache' || '~/.pub-cache' }}
+          key: pub-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: |
+            pub-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-
+
+      - run: flutter pub get
+      - run: flutter config --enable-${{ matrix.target }}-desktop
+      - run: flutter build ${{ matrix.target }} --release
+
+      # Quick sanity artifact — the raw self-contained bundle (not the polished
+      # installer; those are produced in desktop-release.yml on a tag).
+      - name: Archive Linux bundle
+        if: matrix.target == 'linux'
+        run: tar -C build/linux/x64/release/bundle -czf redtick-linux-x64.tar.gz .
+
+      - name: Archive macOS app
+        if: matrix.target == 'macos'
+        run: |
+          APP=$(ls -d build/macos/Build/Products/Release/*.app | head -n1)
+          ditto -c -k --keepParent "$APP" redtick-macos.zip
+
+      - name: Archive Windows build
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath redtick-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: redtick-${{ matrix.target }}
+          path: app/redtick-*.{tar.gz,zip}
+          if-no-files-found: error
+          retention-days: 14
