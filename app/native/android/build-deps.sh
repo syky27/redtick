@@ -57,7 +57,7 @@ fetch() { # url sha-dir
 }
 
 # --- OpenSSL 3 ---
-OSSL_VER=3.0.14
+OSSL_VER="${OSSL_VER:-3.0.14}"
 fetch "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER"
 ( cd "$SRC/openssl-$OSSL_VER"
   export ANDROID_NDK_ROOT="$NDK"
@@ -67,7 +67,7 @@ fetch "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/op
   make install_sw )
 
 # --- jsoncpp ---
-JSON_VER=1.9.5
+JSON_VER="${JSON_VER:-1.9.5}"
 fetch "https://github.com/open-source-parsers/jsoncpp/archive/refs/tags/$JSON_VER.tar.gz" "jsoncpp-$JSON_VER"
 cmake -S "$SRC/jsoncpp-$JSON_VER" -B "$WORK/jsoncpp-$ABI" "${CMAKE_COMMON[@]}" \
   -DJSONCPP_WITH_TESTS=OFF -DJSONCPP_WITH_POST_BUILD_UNITTEST=OFF \
@@ -75,7 +75,7 @@ cmake -S "$SRC/jsoncpp-$JSON_VER" -B "$WORK/jsoncpp-$ABI" "${CMAKE_COMMON[@]}" \
 cmake --build "$WORK/jsoncpp-$ABI" --target install -j"$JOBS"
 
 # --- Poco (Crypto, Data/SQLite, NetSSL, Foundation, Util, Net) ---
-POCO_VER=1.12.5p2
+POCO_VER="${POCO_VER:-1.12.4}"
 fetch "https://github.com/pocoproject/poco/archive/refs/tags/poco-$POCO_VER-release.tar.gz" "poco-poco-$POCO_VER-release"
 cmake -S "$SRC/poco-poco-$POCO_VER-release" -B "$WORK/poco-$ABI" "${CMAKE_COMMON[@]}" \
   -DOPENSSL_ROOT_DIR="$PREFIX" \

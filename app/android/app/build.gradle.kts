@@ -7,7 +7,9 @@ plugins {
 android {
     namespace = "cz.syky.redtick.redtick"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Pinned to match native/android/build-deps.sh and the CI NDK install so the
+    // cross-built deps and the core are compiled with the same NDK/libc++.
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

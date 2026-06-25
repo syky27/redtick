@@ -86,3 +86,65 @@ jobs:
             libxmu-dev libx11-dev ninja-build libgtk-3-dev
       - run: flutter pub get
       - run: flutter build ${{ matrix.target }} --debug
+
+  android-apk:
+    # Full Android build (FP-11): GitHub runners can reach dl.google.com (the NDK
+    # host blocked in the dev sandbox), so the core + its native deps are
+    # cross-compiled here and packaged into an APK.
+    runs-on: ubuntu-24.04
+    env:
+      ABIS: 'arm64-v8a armeabi-v7a x86_64'
+      ANDROID_API: '24'
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK + CMake
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager --install "ndk;27.0.12077973" "cmake;3.22.1" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Cache cross-built native deps (OpenSSL/Poco/jsoncpp)
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: app/native/android/.deps-prefix
+          key: android-deps-${{ hashFiles('app/native/android/build-deps.sh') }}-${{ env.ABIS }}
+
+      - name: Cross-compile native deps per ABI
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        working-directory: app/native/android
+        run: |
+          for abi in $ABIS; do ./build-deps.sh "$abi"; done
+
+      - run: flutter pub get
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Verify the core .so is packaged in the APK
+        run: |
+          set -e
+          APK=build/app/outputs/flutter-apk/app-debug.apk
+          unzip -l "$APK" | grep -E 'lib/(arm64-v8a|x86_64)/libTogglDesktopLibrary.so'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: redtick-debug-apk
+          path: app/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error

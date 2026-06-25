@@ -1,0 +1,3 @@
+# Cross-compiled dependency build/output (produced by build-deps.sh)
+.deps-build/
+.deps-prefix/
