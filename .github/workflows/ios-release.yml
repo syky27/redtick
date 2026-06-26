@@ -82,7 +82,7 @@ jobs:
       - name: Configure iOS build
         if: steps.signing.outputs.enabled == 'true'
         run: |
-          flutter build ios --config-only --release \
+          flutter build ios --config-only --release --no-codesign \
             --build-name=${{ steps.ver.outputs.version }} \
             --build-number=${{ steps.ver.outputs.build }} \
             --dart-define=REDTICK_RELEASE_TAG=${{ github.ref_name }} \
