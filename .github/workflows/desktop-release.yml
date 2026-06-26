@@ -1,0 +1,175 @@
+# Release pipeline for the `redtick` Flutter desktop app.
+# On a v* tag (or manual dispatch) build each desktop OS, package a polished
+# installer (Linux AppImage, macOS .dmg, Windows Inno Setup .exe), and attach
+# them to a DRAFT GitHub Release. Artifacts are UNSIGNED in this iteration.
+name: desktop-release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# Read-only by default; only the release job is granted write to create a Release.
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.44.3
+
+jobs:
+  build:
+    name: build-${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux
+          - os: macos-14
+            target: macos
+          - os: windows-latest
+            target: windows
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version + tag
+        id: ver
+        shell: bash
+        run: |
+          REF="${GITHUB_REF_NAME}"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="$REF"; VERSION="${REF#v}"
+          else
+            VERSION=$(grep '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | cut -d'+' -f1)
+            TAG="${REF//\//-}-dev"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install Linux desktop build deps
+        if: matrix.target == 'linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev file
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter config --enable-${{ matrix.target }}-desktop
+      - run: flutter build ${{ matrix.target }} --release
+        env:
+          # permission_handler_windows (transitive via live_activities) includes
+          # C++/WinRT's <experimental/coroutine>, rejected as a hard error by the
+          # current MSVC STL (STL1011). cl.exe reads $CL per TU. Ignored elsewhere.
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+
+      # ---- Linux: AppImage ----
+      - name: Package AppImage
+        if: matrix.target == 'linux'
+        run: |
+          set -e
+          APPDIR=AppDir
+          rm -rf "$APPDIR"
+          mkdir -p "$APPDIR/usr/bin"
+          cp -r build/linux/x64/release/bundle/. "$APPDIR/usr/bin/"
+          cp packaging/linux/redtick.desktop "$APPDIR/redtick.desktop"
+          cp packaging/linux/AppRun "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+          cp assets/icon/icon_master.png "$APPDIR/redtick.png"
+          cp assets/icon/icon_master.png "$APPDIR/.DirIcon"
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --no-appstream \
+            "$APPDIR" "redtick-${{ steps.ver.outputs.tag }}-x86_64.AppImage"
+
+      # ---- macOS: .dmg (unsigned) ----
+      - name: Package DMG
+        if: matrix.target == 'macos'
+        run: |
+          set -e
+          brew install create-dmg
+          APP=$(ls -d build/macos/Build/Products/Release/*.app | head -n1)
+          DMG="redtick-${{ steps.ver.outputs.tag }}.dmg"
+          create-dmg \
+            --volname "Redtick" \
+            --window-size 540 360 \
+            --icon-size 100 \
+            --icon "$(basename "$APP")" 150 185 \
+            --app-drop-link 390 185 \
+            --no-internet-enable \
+            "$DMG" "$APP" \
+          || hdiutil create -volname "Redtick" -srcfolder "$APP" -ov -format UDZO "$DMG"
+
+      # ---- Windows: Inno Setup installer (unsigned) ----
+      - name: Package installer (Inno Setup)
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $rel = "build\windows\x64\runner\Release"
+          # Bundle the VC++ runtime so it runs on a clean Windows install.
+          foreach ($dll in @('msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll')) {
+            $src = Join-Path $env:SystemRoot "System32\$dll"
+            if (Test-Path $src) { Copy-Item $src -Destination $rel -Force }
+          }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & "$iscc" `
+            /DMyAppVersion=${{ steps.ver.outputs.version }} `
+            /DBuildDir="$((Resolve-Path $rel).Path)" `
+            /DOutputDir="$((Resolve-Path .).Path)" `
+            /DOutputName="redtick-${{ steps.ver.outputs.tag }}-setup" `
+            packaging\windows\redtick.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: |
+            app/redtick-*.AppImage
+            app/redtick-*.dmg
+            app/redtick-*-setup.exe
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/redtick-*
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ## Downloads (unsigned)
+
+            - **macOS** — `redtick-*.dmg` (Apple Silicon). First launch is blocked by
+              Gatekeeper: right-click the app → **Open**, or run
+              `xattr -dr com.apple.quarantine /Applications/redtick.app`.
+            - **Windows** — `redtick-*-setup.exe`. SmartScreen may warn for an unknown
+              publisher: **More info → Run anyway**.
+            - **Linux** — `redtick-*-x86_64.AppImage`. `chmod +x` it and run; requires
+              system GTK 3.
+
+            These builds are not code-signed yet. Signing/notarization is a planned
+            follow-up.

@@ -1,2 +1,0 @@
-MyMacro(Get)
-MyMacro(Set)

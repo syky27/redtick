@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Redtick
+GenericName=Time Tracker
+Comment=Track your Redmine time
+Exec=redtick
+Icon=redtick
+Terminal=false
+Categories=Office;Utility;ProjectManagement;
+StartupWMClass=redtick
