@@ -15,6 +15,7 @@
   <a href="#about">About</a> •
   <a href="#built-with-claude-code">Built with Claude Code</a> •
   <a href="#how-it-works">How it works</a> •
+  <a href="#redmine-setup-required-custom-fields">Custom fields</a> •
   <a href="#configure">Configure</a> •
   <a href="#build">Build</a> •
   <a href="#credits">Credits</a>
@@ -55,8 +56,47 @@ key is kept in the OS keychain (`flutter_secure_storage`); offline writes are qu
 and retried. See `app/README.md` and `docs/flutter-port/` for the architecture, the
 Redmine API contract, and platform-feature notes.
 
+# Redmine setup: required custom fields
+
+Before you track anything, your Redmine instance needs **three time-entry custom fields**. Redtick stores a little extra data on every time entry through them, and without them you lose exact clock times and reliable editing/deletion. Create them once, in **Administration → Custom fields → New custom field → Time entries**:
+
+| Name (exact) | Format | Holds | Required? |
+| --- | --- | --- | --- |
+| `toggl_start` | Text | Exact start time, ISO 8601 (e.g. `2026-06-24T09:03:11+02:00`) | No |
+| `toggl_stop`  | Text | Exact stop time, ISO 8601 | No |
+| `toggl_guid`  | Text | The app's stable id for the entry (used to match edits/deletes) | No |
+
+Setup notes:
+
+- **The names must match exactly** — `toggl_start`, `toggl_stop`, `toggl_guid`. Redtick resolves the fields *by name* at login (it never assumes hardcoded field ids), so a typo means the field won't be found.
+- **Format must be `Text`** (a plain string). The values are ISO 8601 timestamps and a GUID, both written and read as text.
+- **Leave "Required" unchecked.** Redtick fills these in automatically, but entries logged from the Redmine web UI won't have them — making them required would break manual logging.
+- **Tick the projects** the field applies to (or "for all projects"), and keep it **visible** so the API key can read it back.
+- You need Redmine **admin rights to create custom fields**, but you do *not* need admin rights to use them afterwards — a normal user's API key reads the ids straight off its own time entries.
+
+## Why these fields are needed
+
+A native Redmine time entry only records **`hours`** and **`spent_on`** (a calendar *date*, not a clock time), plus an activity and a comment. That's lossy for a desktop timer in two ways, and the custom fields close both gaps:
+
+- **Exact start/stop times.** Redmine has no concept of "started at 09:03, stopped at 10:47" — only "1.73 hours on 2026-06-24". `toggl_start` / `toggl_stop` preserve the precise timestamps so the day calendar can place and resize blocks correctly. When they're absent (e.g. an entry typed into the Redmine web UI), Redtick falls back to synthesizing a start time from `spent_on` + `hours`, so the block lands on the right day but at an approximate time.
+- **Stable identity for edits and deletes.** Redmine's own time-entry id changes meaning between machines and re-syncs; `toggl_guid` carries the app's own id so an edit (`PUT`) or delete (`DELETE`) reliably targets the *same* entry instead of creating duplicates.
+
+If you skip the fields entirely, tracking still works — new entries are created with the right hours and date — but exact times are approximated and idempotent editing is degraded. Creating the three fields is a one-time, five-minute step that makes the experience lossless.
+
+## Can I hide these fields in the Redmine web UI?
+
+First, a clarification: these are **time-entry** custom fields, not **issue** custom fields. They **never appear on the issue edit form** — only on Redmine's "Log time" / time-entry edit form. So if you just want the issue screen kept clean, there's nothing to do.
+
+To hide them from the time-entry form itself, your only lever is the field's **"Visible"** setting (all users vs. specific roles). Redmine has **no "expose in the API but hide from the form" switch** — the visibility setting gates the REST API exactly as it gates the UI. And Redtick *reads these values back through the API*, so:
+
+- **Hiding them from other users is fine** — restrict "Visible" to the role(s) your tracking accounts hold, and everyone else stops seeing them with no functional impact.
+- **Do not hide them from the account whose API key Redtick uses.** If that user can't see the fields, the API omits them, and Redtick degrades: it falls back to *synthesizing* start times from `spent_on` + `hours` (losing the exact clock times), and — for non-admins — can fail to resolve the field ids by name and fall back to instance-specific defaults that may be wrong.
+
+In short: you can scope visibility to the tracking users, but you can't make the fields invisible *and* still readable by the same API key. The practical choice is to leave them visible to the tracking accounts and accept a small amount of clutter on the log-time form.
+
 # Configure
 
+0. **One-time:** make sure the three [time-entry custom fields](#redmine-setup-required-custom-fields) exist on your Redmine instance.
 1. Launch Redtick.
 2. On the login screen, enter the URL of your Redmine instance (e.g. `https://redmine.example.com`) and your personal **API key** (Redmine → *My account* → *API access key*).
 3. Start tracking — entries sync to that Redmine backend.
