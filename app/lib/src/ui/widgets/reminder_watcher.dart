@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/providers.dart';
+import '../../state/reminder_notice.dart';
 import '../../state/reminder_settings.dart';
 
 /// Wraps the app shell and, while **no** timer is running, periodically nags the
@@ -13,8 +14,12 @@ import '../../state/reminder_settings.dart';
 /// widget just drives the clock and surfaces the notice. Design §3.9 / screen
 /// 10 ("IDLE & REMINDERS").
 class ReminderWatcher extends ConsumerStatefulWidget {
-  const ReminderWatcher({super.key, required this.child});
+  const ReminderWatcher({super.key, required this.child, this.clock = DateTime.now});
   final Widget child;
+
+  /// Wall-clock, injectable so tests can drive the throttle/idle gating
+  /// deterministically (the periodic timer itself is driven by `tester.pump`).
+  final DateTime Function() clock;
 
   @override
   ConsumerState<ReminderWatcher> createState() => _ReminderWatcherState();
@@ -28,10 +33,17 @@ class _ReminderWatcherState extends ConsumerState<ReminderWatcher> {
   /// the countdown starts fresh once tracking stops.
   DateTime? _lastReminder;
 
+  /// Consecutive ticks observing "no timer running". Defence-in-depth on top of
+  /// the reconcile fix: even if the timer state flaps to null for a single tick
+  /// (server read-miss), we only nag once idle is sustained across
+  /// [_idleTicksToFire] ticks (~60s). Reset whenever a timer is observed.
+  int _idleTicks = 0;
+  static const int _idleTicksToFire = 2;
+
   @override
   void initState() {
     super.initState();
-    _lastReminder = DateTime.now();
+    _lastReminder = widget.clock();
     // Request OS notification permission up front so the reminder surfaces as a
     // system notification (not just the in-app fallback) when it first fires.
     ref.read(notificationPresenterProvider).init();
@@ -49,12 +61,19 @@ class _ReminderWatcherState extends ConsumerState<ReminderWatcher> {
     final settings = ref.read(reminderSettingsProvider);
     final running = ref.read(timerStateProvider).asData?.value;
     final isRunning = running != null && running.isRunning;
-    final now = DateTime.now();
+    final now = widget.clock();
 
     if (isRunning) {
+      _idleTicks = 0;
       _lastReminder = now; // re-anchor: count the gap from when tracking stops
       return;
     }
+
+    // Absorb a single transient flap to null: only consider a reminder once
+    // idle has been observed across [_idleTicksToFire] consecutive ticks.
+    _idleTicks++;
+    if (_idleTicks < _idleTicksToFire) return;
+
     if (!shouldRemind(
       now: now,
       lastReminder: _lastReminder,
@@ -67,15 +86,11 @@ class _ReminderWatcherState extends ConsumerState<ReminderWatcher> {
     _lastReminder = now;
     const title = 'Redtick';
     const body = 'No timer running — track your time?';
-    // Prefer the OS notification (corner banner); fall back to the in-app banner
-    // only when it wasn't delivered (permission denied / unsupported platform).
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    final delivered =
-        await ref.read(notificationPresenterProvider).show(title, body);
-    if (!delivered && mounted) {
-      messenger?.showSnackBar(
-          const SnackBar(content: Text('$title — $body')));
-    }
+    // Persistent in-app banner — stays until a timer starts (no auto-dismiss).
+    ref.read(reminderNoticeProvider.notifier).show(body);
+    // Plus the OS notification as an extra cue (surfaces even when the window is
+    // unfocused). Fire-and-forget; failures degrade silently to logging.
+    unawaited(ref.read(notificationPresenterProvider).show(title, body));
   }
 
   @override

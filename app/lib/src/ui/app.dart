@@ -7,11 +7,13 @@ import '../platform/notifications.dart';
 import '../state/multi_task_settings.dart';
 import '../state/providers.dart';
 import '../state/release_watch.dart';
+import '../state/reminder_notice.dart';
 import '../state/theme_mode.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'theme.dart';
 import 'widgets/idle_prompt.dart';
+import 'widgets/reminder_banner.dart';
 import 'widgets/reminder_watcher.dart';
 import 'widgets/release_update_banner.dart';
 
@@ -109,6 +111,9 @@ class _AuthGate extends ConsumerWidget {
       final list = (next.asData?.value ?? const <TimeEntry>[])
           .where((e) => e.isRunning)
           .toList();
+      // A running timer clears the persistent "track your time" banner at once
+      // (fires on the optimistic start, before the POST confirms).
+      if (list.isNotEmpty) ref.read(reminderNoticeProvider.notifier).clear();
       if (_liveSurfaceKey(next.asData?.value) == prevKey) return;
       if (list.isEmpty) {
         live.end();
@@ -141,7 +146,14 @@ class _AuthGate extends ConsumerWidget {
         ? const IdleWatcher(
             child: ReminderWatcher(
               child: _LifecycleRefresher(
-                child: ReleaseUpdateBannerHost(child: HomeShell()),
+                child: Column(
+                  children: [
+                    ReminderBanner(),
+                    Expanded(
+                      child: ReleaseUpdateBannerHost(child: HomeShell()),
+                    ),
+                  ],
+                ),
               ),
             ),
           )
