@@ -22,7 +22,10 @@ env:
 
 jobs:
   testflight:
-    runs-on: macos-14
+    # macos-15 ships Xcode 16, required to open the iOS project's file-system
+    # synchronized groups (the Live Activity extension); macos-14's Xcode 15
+    # crashes on them.
+    runs-on: macos-15
     defaults:
       run:
         working-directory: app

@@ -129,11 +129,26 @@ jobs:
           KEYCHAIN="$RUNNER_TEMP/redtick-signing.keychain-db"
           CERT="$RUNNER_TEMP/devid.p12"
           echo -n "$MACOS_CERT_P12_BASE64" | base64 --decode > "$CERT"
+          echo "Decoded .p12: $(wc -c < "$CERT") bytes"
           security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security import "$CERT" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 \
-            -k "$KEYCHAIN" -T /usr/bin/codesign
+          # Import the identity. `security import` can reject a newer-format .p12
+          # ("Unknown format"); if so, normalize it with openssl and retry.
+          if ! security import "$CERT" -P "$MACOS_CERT_PASSWORD" -A -f pkcs12 \
+               -k "$KEYCHAIN" -T /usr/bin/codesign 2>/tmp/imp.err; then
+            echo "Direct import failed ($(cat /tmp/imp.err)); normalizing .p12 via openssl…"
+            OSSL=$([ -x /opt/homebrew/opt/openssl@3/bin/openssl ] \
+              && echo /opt/homebrew/opt/openssl@3/bin/openssl || command -v openssl)
+            ( "$OSSL" pkcs12 -in "$CERT" -nodes -passin "pass:$MACOS_CERT_PASSWORD" -out "$RUNNER_TEMP/d.pem" 2>/tmp/o.err \
+              || "$OSSL" pkcs12 -in "$CERT" -nodes -legacy -passin "pass:$MACOS_CERT_PASSWORD" -out "$RUNNER_TEMP/d.pem" 2>>/tmp/o.err ) \
+              || { echo "::error::MACOS_CERT_P12_BASE64 is not a valid PKCS#12 for MACOS_CERT_PASSWORD — re-export the .p12 and re-set the secret (see docs/RELEASE_SIGNING.md). openssl: $(cat /tmp/o.err)"; exit 1; }
+            "$OSSL" pkcs12 -export -legacy -in "$RUNNER_TEMP/d.pem" -out "$CERT" -passout "pass:$MACOS_CERT_PASSWORD" 2>/dev/null \
+              || "$OSSL" pkcs12 -export -in "$RUNNER_TEMP/d.pem" -out "$CERT" -passout "pass:$MACOS_CERT_PASSWORD"
+            rm -f "$RUNNER_TEMP/d.pem"
+            security import "$CERT" -P "$MACOS_CERT_PASSWORD" -A -f pkcs12 \
+              -k "$KEYCHAIN" -T /usr/bin/codesign
+          fi
           # Allow codesign to use the key non-interactively.
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
