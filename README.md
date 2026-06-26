@@ -42,16 +42,18 @@ This fork was implemented **almost entirely by [Claude Code](https://claude.com/
 
 # How it works
 
-Toggl's hardcoded backend hosts are replaced with a **single, runtime-configurable Redmine base URL** (`src/urls.cc`). Every endpoint the app used to spread across separate Toggl hosts now resolves to that one Redmine base:
+Redtick is a single **Flutter** codebase (`app/`) that talks to **Redmine directly
+over HTTP** — no Toggl cloud, no native C++ core. Login points the app at a
+**runtime-configurable Redmine base URL**; every call resolves to that one host.
 
-```cpp
-std::string API()        { return BaseURL(); }
-std::string SyncAPI()    { return BaseURL(); }
-std::string WebSocket()  { return BaseURL(); }
-// …all resolve to the configurable Redmine base
-```
-
-The base URL is set at runtime on the login screen via `urls::SetBaseURL()` and persisted beside the local database, so it survives restarts. For headless / CI runs it falls back to the **`TOGGL_REDMINE_URL`** environment variable. Nothing is hardcoded to an internal host. A small `RedmineClient` (`src/redmine_client.{h,cc}`) fans the login out across Redmine's `/users/current`, `/projects`, `/issues`, `/time_entries` and activity endpoints and assembles what the existing model loader expects.
+A pure-Dart client — `RedmineApiClient` + `RedmineService` (`app/lib/src/data/`) —
+fans the session out across Redmine's `/users/current`, `/projects`, `/issues`,
+`/time_entries` and activity endpoints and feeds the Riverpod state the UI renders.
+A running timer is stored as a Redmine time entry whose start/stop timestamps and
+GUID live in custom fields. The base URL is entered on the login screen and the API
+key is kept in the OS keychain (`flutter_secure_storage`); offline writes are queued
+and retried. See `app/README.md` and `docs/flutter-port/` for the architecture, the
+Redmine API contract, and platform-feature notes.
 
 # Configure
 
@@ -59,60 +61,29 @@ The base URL is set at runtime on the login screen via `urls::SetBaseURL()` and 
 2. On the login screen, enter the URL of your Redmine instance (e.g. `https://redmine.example.com`) and your personal **API key** (Redmine → *My account* → *API access key*).
 3. Start tracking — entries sync to that Redmine backend.
 
-Headless / scripted use:
-
-```bash
-export TOGGL_REDMINE_URL="https://redmine.example.com"
-./TogglDesktop
-```
-
 # Build
 
-Only the **Qt UI + C++ core** are built in this fork (the legacy macOS/Swift and Windows/WPF front-ends are not maintained here). macOS is the verified path; Linux uses the same CMake build.
-
-## macOS (verified)
-
-One command from the repo root — it installs any missing Homebrew dependencies, configures CMake, builds, and launches the app:
+One Flutter app for iOS, Android, macOS, Windows, and Linux. Install
+[Flutter](https://docs.flutter.dev/get-started/install) (stable; developed against
+3.44.3), then from `app/`:
 
 ```bash
-./run-mac.sh
+cd app
+flutter pub get
+flutter run -d macos        # or windows / linux / a connected device
+
+flutter analyze
+flutter test                # the full suite under app/test/
 ```
 
-Equivalent manual build (modern Homebrew Qt 5 / POCO / OpenSSL 3 / jsoncpp):
+Linux desktop needs the GTK build deps: `clang cmake ninja-build pkg-config
+libgtk-3-dev liblzma-dev`. macOS/Windows just need the standard Flutter desktop
+toolchain (Xcode / Visual Studio "Desktop development with C++").
 
-```bash
-brew install pkg-config poco jsoncpp        # qt@5 + openssl@3 usually already present
-cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-  -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5);$(brew --prefix poco);$(brew --prefix jsoncpp)" \
-  -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
-  -DPOCO_INCLUDE_DIRS="$(brew --prefix poco)/include" \
-  -DJSONCPP_INCLUDE_DIRS="$(brew --prefix jsoncpp)/include"
-cmake --build build --target TogglDesktop -j8
-# run from the build dir so it finds the bundled cacert.pem
-cd build/src/ui/linux/TogglDesktop && ./TogglDesktop
-```
-
-The core links the **system OpenSSL 3**, so TLS to a modern Redmine works out of the box (the ancient bundled OpenSSL 1.0.1e is only used by the unmaintained Windows build).
-
-## Linux
-
-Qt 5.12+ modules: **QtWidgets** (with private headers), **QtNetwork**, **QtDBus**, **QtX11Extras**. Plus `libXScrnSaver` (`libxss-dev` / `libXScrnSaver-devel`) and POCO / OpenSSL 3 / jsoncpp.
-
-```bash
-sudo apt install build-essential libxss-dev libgl-dev libreadline-dev \
-                 qtbase5-dev qtbase5-private-dev libqt5x11extras5-dev \
-                 libpoco-dev libssl-dev libjsoncpp-dev
-mkdir -p build && cd build
-cmake ..
-make -j8
-./src/ui/linux/TogglDesktop/TogglDesktop
-```
-
-> Note: Qt **NetworkAuth is no longer required** — the Google/SSO OAuth paths were removed in this fork.
-
-## Windows
-
-The legacy WPF client is not maintained in this fork and the Qt UI on Windows is currently **untested**. Contributions welcome.
+Release builds and packaged installers (Linux AppImage, macOS `.dmg`, Windows
+`setup.exe`) are produced by GitHub Actions in
+[`.github/workflows/`](.github/workflows) — `desktop-ci.yml` on every push/PR and
+`desktop-release.yml` on a `v*` tag.
 
 # Credits
 

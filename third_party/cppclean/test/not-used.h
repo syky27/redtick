@@ -1,2 +1,0 @@
-
-class PleaseDontUseMe_KThxBye {};
