@@ -26,20 +26,26 @@ class RedmineService {
 
   /// Async factory: restores a persisted session and, if present, auto-logs-in
   /// (the "instant relaunch" the Qt app gets from its saved session).
-  /// [httpClient] and [queue] are injectable for tests.
+  /// [httpClient] and [queue] are injectable for tests; [clock] lets tests drive
+  /// the reconcile grace/miss window deterministically (defaults to wall-clock).
   static Future<RedmineService> create({
     http.Client? httpClient,
     OfflineQueue? queue,
+    DateTime Function()? clock,
   }) async {
     final s = RedmineService._()
       .._httpClient = httpClient
       .._queue = queue ?? OfflineQueue();
+    if (clock != null) s._now = clock;
     await s._restore();
     return s;
   }
 
   http.Client? _httpClient;
   OfflineQueue _queue = OfflineQueue();
+
+  /// Wall-clock, injectable for tests (the reconcile drop-guard reads it).
+  DateTime Function() _now = DateTime.now;
 
   // --- persisted config: base URL + settings in prefs; the API **key** in the
   //     OS keychain (flutter_secure_storage). Keychain calls are wrapped so a
@@ -124,6 +130,16 @@ class RedmineService {
   final _entriesByGuid = <String, _Entry>{};
   List<_Entry> _recent = const [];
   final List<_RunningEntry> _running = [];
+
+  // Reconcile guard: a confirmed running entry must be absent from the server's
+  // open set for this many consecutive reconciles — and be at least [_dropGrace]
+  // old — before it's dropped. Absorbs transient read-misses (replication lag,
+  // recent-window eviction, a mid-flight schema re-resolution) so the running
+  // state never flaps to "stopped" while a timer is genuinely running. A real
+  // remote stop is persistent, so it still clears within ~2 polls (≤60s).
+  static const int _missesToDrop = 2;
+  static const Duration _dropGrace = Duration(seconds: 45);
+
   Timer? _ticker;
   Timer? _poll; // periodic cross-device reconcile (running stop / remote start)
   bool _refreshing = false; // re-entrancy guard for refresh()
@@ -387,11 +403,21 @@ class RedmineService {
       try {
         final te = await api.timeEntry(r.redmineId!);
         final mapped = te == null ? null : _mapEntry(te);
-        if (mapped == null || !mapped.running) {
-          // Stopped or deleted elsewhere → full reconcile drops it.
-          await refresh(silent: true);
+        if (mapped != null && mapped.running) {
+          r.missStreak = 0; // confirmed open → reset
+          _emit(_onlineState, 0); // reachable; keep ticking locally
         } else {
-          _emit(_onlineState, 0); // confirmed reachable; keep ticking locally
+          // A single not-running read may be a transient lag/read-miss. Only do
+          // the authoritative full reconcile (which drops it) once past the
+          // grace window and after [_missesToDrop] consecutive misses.
+          final age = r.confirmedAt == null
+              ? Duration.zero
+              : _now().difference(r.confirmedAt!);
+          if (age >= _dropGrace && ++r.missStreak >= _missesToDrop) {
+            await refresh(silent: true);
+          } else {
+            _emit(_onlineState, 0); // tolerate the miss; keep ticking
+          }
         }
       } on RedmineException catch (e) {
         if (e.kind == RedmineErrorKind.network) _emit(_onlineState, 1);
@@ -547,18 +573,32 @@ class RedmineService {
         activityId: e.activityId,
         description: e.description,
         start: e.start,
-      ));
+      )..confirmedAt = _now());
     }
 
-    // Fill ids / drop entries stopped elsewhere; keep in-flight local starts.
+    // Fill ids / drop entries stopped elsewhere; keep in-flight local starts and
+    // tolerate transient server read-misses: a confirmed entry is only dropped
+    // after [_missesToDrop] consecutive misses and never within [_dropGrace] of
+    // confirmation, so the running state can't flap to "stopped" mid-track.
+    final now = _now();
     final toRemove = <_RunningEntry>[];
     for (final r in _running) {
       final match = matchFor(r);
       if (match != null) {
-        r.redmineId ??= match.id;
+        if (r.redmineId == null) {
+          r.redmineId = match.id;
+          r.confirmedAt = now;
+        }
+        r.missStreak = 0; // seen open → reset
       } else if (r.redmineId != null) {
-        toRemove.add(r);
+        final age = r.confirmedAt == null
+            ? Duration.zero
+            : now.difference(r.confirmedAt!);
+        if (age >= _dropGrace && ++r.missStreak >= _missesToDrop) {
+          toRemove.add(r);
+        }
       }
+      // r.redmineId == null && no match → in-flight local start; keep it.
     }
     _running.removeWhere(toRemove.contains);
 
@@ -1001,6 +1041,7 @@ class RedmineService {
       for (final e in _running) {
         if (e.guid == guid) {
           e.redmineId = id;
+          e.confirmedAt = _now(); // start POST confirmed → start the grace clock
           break;
         }
       }
@@ -1458,6 +1499,17 @@ class _RunningEntry {
   /// The in-flight create POST (resolves to the new id, or null on failure) so
   /// a fast stop can await it instead of posting a duplicate entry.
   Future<int?>? createFuture;
+
+  /// Consecutive reconciles where this confirmed entry was *not* in the server's
+  /// open set. Reset to 0 whenever it's seen open again; the entry is only
+  /// dropped once this reaches `_missesToDrop`, so a single transient read-miss
+  /// never flaps the running state to "stopped".
+  int missStreak = 0;
+
+  /// When [redmineId] was confirmed (start POST returned, or filled from a server
+  /// match). A confirmed entry younger than `_dropGrace` is never dropped on a
+  /// miss — the server may not have indexed it into the recent window yet.
+  DateTime? confirmedAt;
 }
 
 /// A Redmine TimeEntryActivity (id + name) for the editor / settings pickers.

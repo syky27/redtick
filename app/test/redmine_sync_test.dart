@@ -38,6 +38,55 @@ Map<String, dynamic> _entry({
       ],
     };
 
+/// A minimal Redmine backend whose recent time-entry list is supplied per call
+/// by [entries], so a test can make an open entry appear/disappear between
+/// pulls. The cheap single-entry poll path isn't exercised here (tests call
+/// `refresh()` directly), so `/time_entries/{id}.json` just 404s.
+MockClient _backend(List<Map<String, dynamic>> Function() entries) {
+  return MockClient((req) async {
+    final p = req.url.path;
+    if (req.method == 'GET') {
+      if (p.endsWith('/users/current.json')) {
+        return _json({
+          'user': {'id': 9, 'mail': 'me@x', 'firstname': 'Me', 'lastname': ''}
+        });
+      }
+      if (p.endsWith('/projects.json')) {
+        return _json({
+          'projects': [
+            {'id': 75, 'name': 'SUMA'}
+          ],
+          'total_count': 1
+        });
+      }
+      if (p.endsWith('/issues.json')) {
+        return _json({'issues': [], 'total_count': 0});
+      }
+      if (p.endsWith('/time_entry_activities.json')) {
+        return _json({
+          'time_entry_activities': [
+            {'id': 6, 'name': 'Development', 'is_default': true, 'active': true}
+          ]
+        });
+      }
+      if (p.endsWith('/custom_fields.json')) {
+        return _json({
+          'custom_fields': [
+            {'id': 12, 'name': 'toggl_start', 'customized_type': 'time_entry'},
+            {'id': 14, 'name': 'toggl_stop', 'customized_type': 'time_entry'},
+            {'id': 13, 'name': 'toggl_guid', 'customized_type': 'time_entry'},
+          ]
+        });
+      }
+      if (p.endsWith('/time_entries.json')) {
+        final e = entries();
+        return _json({'time_entries': e, 'total_count': e.length});
+      }
+    }
+    return http.Response('not found', 404);
+  });
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -117,7 +166,9 @@ void main() {
       return http.Response('not found', 404);
     });
 
-    final svc = await RedmineService.create(httpClient: client);
+    var clockNow = DateTime(2026, 6, 25, 9, 0, 0);
+    final svc =
+        await RedmineService.create(httpClient: client, clock: () => clockNow);
     addTearDown(svc.dispose);
 
     final running = svc.timerState.firstWhere((t) => t != null && t.isRunning);
@@ -126,11 +177,77 @@ void main() {
     await running.timeout(const Duration(seconds: 5)); // discovered running
     await Future<void>.delayed(const Duration(milliseconds: 50)); // settle
 
-    // Remote stop, then a refresh (exactly what the poll does on detection).
+    // Remote stop. The drop-guard tolerates a single transient read-miss, so a
+    // confirmed timer only clears after two consecutive reconciles past the
+    // grace window — the two-confirmation contract that stops false flaps.
     stopped = true;
+    clockNow = clockNow.add(const Duration(seconds: 60)); // past _dropGrace
     final cleared = svc.timerState.firstWhere((t) => t == null);
-    await svc.refresh();
+    await svc.refresh(); // miss #1 — still running (grace passed, streak = 1)
+    expect(svc.currentTimer, isNotNull);
+    await svc.refresh(); // miss #2 — now cleared
     await cleared.timeout(const Duration(seconds: 5));
     expect(svc.currentTimer, isNull);
+  });
+
+  test('a single transient read-miss keeps the running timer', () async {
+    var present = true; // whether the open entry is returned by the list pull
+    final client = _backend(() => present
+        ? [
+            _entry(
+                id: 1500, start: '2026-06-25T08:00:00Z', stop: '', guid: 'abc')
+          ]
+        : const []);
+
+    var clockNow = DateTime(2026, 6, 25, 9, 0, 0);
+    final svc =
+        await RedmineService.create(httpClient: client, clock: () => clockNow);
+    addTearDown(svc.dispose);
+
+    final running = svc.timerState.firstWhere((t) => t != null && t.isRunning);
+    svc.setBaseUrl('https://x');
+    svc.login('', 'key');
+    await running.timeout(const Duration(seconds: 5)); // discovered running
+
+    // Past the grace window, the entry vanishes for a single pull (server lag /
+    // recent-window eviction) then returns — it must NOT be dropped.
+    clockNow = clockNow.add(const Duration(seconds: 60));
+    present = false;
+    await svc.refresh();
+    expect(svc.currentTimer, isNotNull, reason: 'one miss must not drop');
+    present = true;
+    await svc.refresh();
+    expect(svc.currentTimer, isNotNull, reason: 're-seen → streak resets');
+    // And it survives subsequent pulls while visible.
+    await svc.refresh();
+    expect(svc.currentTimer, isNotNull);
+  });
+
+  test('a confirmed timer within the grace window is never dropped', () async {
+    var present = true;
+    final client = _backend(() => present
+        ? [
+            _entry(
+                id: 1500, start: '2026-06-25T08:00:00Z', stop: '', guid: 'abc')
+          ]
+        : const []);
+
+    var clockNow = DateTime(2026, 6, 25, 9, 0, 0);
+    final svc =
+        await RedmineService.create(httpClient: client, clock: () => clockNow);
+    addTearDown(svc.dispose);
+
+    final running = svc.timerState.firstWhere((t) => t != null && t.isRunning);
+    svc.setBaseUrl('https://x');
+    svc.login('', 'key');
+    await running.timeout(const Duration(seconds: 5));
+
+    // The entry vanishes while still inside the grace window (clock barely
+    // moved): even two consecutive reconciles must NOT drop it.
+    clockNow = clockNow.add(const Duration(seconds: 10)); // < _dropGrace (45s)
+    present = false;
+    await svc.refresh();
+    await svc.refresh();
+    expect(svc.currentTimer, isNotNull);
   });
 }
