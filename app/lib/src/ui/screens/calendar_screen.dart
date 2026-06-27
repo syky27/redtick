@@ -7,6 +7,7 @@ import '../../state/providers.dart';
 import '../theme.dart';
 import '../widgets/entry_bits.dart';
 import '../widgets/issue_picker.dart';
+import 'calendar_layout.dart';
 import 'time_entry_editor_screen.dart';
 
 /// Day calendar (design §3.5): a 24-hour grid with project-colored blocks, a
@@ -22,6 +23,8 @@ class CalendarScreen extends ConsumerStatefulWidget {
 class _CalendarScreenState extends ConsumerState<CalendarScreen> {
   static const double _hourHeight = 60;
   static const double _gutter = 56;
+  static const double _rightMargin = 12;
+  static const double _columnGap = 4;
 
   DateTime _day = _dateOnly(DateTime.now());
 
@@ -45,6 +48,20 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         '${(s % 60).toString().padLeft(2, '0')}';
   }
 
+  /// Derives the start/end DateTimes for [e] (running entries end "now";
+  /// finished entries with no end default to +30min). Shared by the column
+  /// layout and the block renderer so both agree on each entry's span.
+  ({DateTime start, DateTime end}) _entryTimes(TimeEntry e) {
+    final running = e.isRunning;
+    final start = DateTime.fromMillisecondsSinceEpoch(
+            (running ? -e.durationInSeconds : e.started) * 1000)
+        .toLocal();
+    final end = (!running && e.ended > 0)
+        ? DateTime.fromMillisecondsSinceEpoch(e.ended * 1000).toLocal()
+        : (running ? DateTime.now() : start.add(const Duration(minutes: 30)));
+    return (start: start, end: end);
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -53,6 +70,11 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         .toList();
     final totalSec = entries.fold<int>(
         0, (a, e) => a + (e.durationInSeconds > 0 ? e.durationInSeconds : 0));
+    // Entries shorter than this don't claim a column — a stray few-second blip
+    // must not squeeze a real, long entry into a narrow side-by-side column.
+    const minColumnDuration = Duration(seconds: 60);
+    final lanes = packOverlapColumnsIgnoringShort(
+        [for (final e in entries) _entryTimes(e)], minColumnDuration);
 
     return ColoredBox(
       color: cs.surface,
@@ -83,17 +105,27 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
               },
             ),
             Expanded(
-              child: SingleChildScrollView(
-                child: SizedBox(
-                  height: _hourHeight * 24,
-                  child: Stack(
-                    children: [
-                      ..._hourLines(context),
-                      ...entries.map((e) => _block(context, e)),
-                      ..._nowLine(context),
-                    ],
-                  ),
-                ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.maxWidth;
+                  final available = (width - _gutter - _rightMargin)
+                      .clamp(0.0, double.infinity);
+                  return SingleChildScrollView(
+                    child: SizedBox(
+                      height: _hourHeight * 24,
+                      width: width,
+                      child: Stack(
+                        children: [
+                          _backgroundTapLayer(context),
+                          ..._hourLines(context),
+                          for (final kv in entries.asMap().entries)
+                            _block(context, kv.value, lanes[kv.key], available),
+                          ..._nowLine(context),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           ],
@@ -154,15 +186,60 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     ];
   }
 
-  Widget _block(BuildContext context, TimeEntry e) {
+  // Tap on empty grid space (right of the gutter) -> create a 30-min entry at
+  // that time against a picked issue. Sits under the blocks in the Stack so
+  // taps on existing blocks still open the editor.
+  Widget _backgroundTapLayer(BuildContext context) {
+    return Positioned.fill(
+      left: _gutter,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (d) => _createAt(context, d.localPosition.dy),
+        child: const SizedBox.expand(),
+      ),
+    );
+  }
+
+  Future<void> _createAt(BuildContext context, double localY) async {
+    final raw = _snapMinutes(localY / _hourHeight * 60);
+    final minutes = raw.clamp(0, 24 * 60 - 15).toInt();
+    final start = DateTime(_day.year, _day.month, _day.day)
+        .add(Duration(minutes: minutes));
+    final end = start.add(const Duration(minutes: 30));
+    final issue = await showIssuePicker(context);
+    if (issue == null) return;
+    await ref.read(coreServiceProvider).createEntryAt(
+          issueId: issue.id,
+          projectId: issue.projectId,
+          start: start,
+          end: end,
+          description: issue.subject,
+          subject: issue.subject,
+          projectName: issue.projectName,
+        );
+  }
+
+  // Full detail for a block, shown on hover (desktop) / long-press (mobile) —
+  // the only way to read entries too short to render their text.
+  String _tooltipText(TimeEntry e) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    final t = _entryTimes(e);
+    final range = '${two(t.start.hour)}:${two(t.start.minute)}'
+        '–${two(t.end.hour)}:${two(t.end.minute)}';
+    return [
+      e.description.isNotEmpty ? e.description : '(no description)',
+      entrySubline(e),
+      [range, if (e.duration.isNotEmpty) e.duration].join(' · '),
+    ].where((s) => s.isNotEmpty).join('\n');
+  }
+
+  Widget _block(BuildContext context, TimeEntry e,
+      ({int col, int columns}) lane, double available) {
     final cs = Theme.of(context).colorScheme;
     final running = e.isRunning;
-    final start = DateTime.fromMillisecondsSinceEpoch(
-            (running ? -e.durationInSeconds : e.started) * 1000)
-        .toLocal();
-    final end = (!running && e.ended > 0)
-        ? DateTime.fromMillisecondsSinceEpoch(e.ended * 1000).toLocal()
-        : (running ? DateTime.now() : start.add(const Duration(minutes: 30)));
+    final times = _entryTimes(e);
+    final start = times.start;
+    final end = times.end;
 
     final dragging = _dragGuid == e.guid;
     final baseTop = (start.hour * 60 + start.minute) / 60 * _hourHeight;
@@ -177,10 +254,17 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         : projColor.withValues(alpha: 0.12);
     final edge = running ? cs.primary : projColor;
 
+    final colW = available / lane.columns;
+    final left = _gutter + lane.col * colW;
+    final width = colW - (lane.columns > 1 ? _columnGap : 0);
+    // Suppress text that wouldn't fit (avoids RenderFlex overflow on short
+    // blocks); the tooltip carries the full detail instead.
+    final showTitle = height >= 28;
+    final showSubline = height >= 44;
     return Positioned(
       top: top,
-      left: _gutter,
-      right: 10,
+      left: left,
+      width: width,
       height: height,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -205,37 +289,46 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         onVerticalDragEnd: (_) => _commitDrag(e, start, end),
         child: Stack(
           children: [
-            Container(
-              decoration: BoxDecoration(
-                color: fill,
-                borderRadius: BorderRadius.circular(8),
-                border: Border(left: BorderSide(color: edge, width: 3)),
-                boxShadow: running
-                    ? [BoxShadow(color: edge.withValues(alpha: 0.25), blurRadius: 6)]
-                    : null,
-              ),
-              padding: const EdgeInsets.fromLTRB(8, 5, 8, 5),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    e.description.isNotEmpty ? e.description : '(no description)',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 12.5),
-                  ),
-                  if (height > 36)
-                    Text(
-                      [
-                        entrySubline(e),
-                        if (e.duration.isNotEmpty) e.duration,
-                      ].where((s) => s.isNotEmpty).join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11),
-                    ),
-                ],
+            Tooltip(
+              message: _tooltipText(e),
+              waitDuration: const Duration(milliseconds: 350),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: fill,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border(left: BorderSide(color: edge, width: 3)),
+                  boxShadow: running
+                      ? [BoxShadow(color: edge.withValues(alpha: 0.25), blurRadius: 6)]
+                      : null,
+                ),
+                padding: EdgeInsets.fromLTRB(8, showTitle ? 5 : 0, 8, showTitle ? 5 : 0),
+                child: showTitle
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            e.description.isNotEmpty
+                                ? e.description
+                                : '(no description)',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 12.5),
+                          ),
+                          if (showSubline)
+                            Text(
+                              [
+                                entrySubline(e),
+                                if (e.duration.isNotEmpty) e.duration,
+                              ].where((s) => s.isNotEmpty).join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: cs.onSurfaceVariant, fontSize: 11),
+                            ),
+                        ],
+                      )
+                    : const SizedBox.expand(),
               ),
             ),
             // bottom-edge resize handle

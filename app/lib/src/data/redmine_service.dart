@@ -129,6 +129,11 @@ class RedmineService {
   // opted into concurrent tracking (multi_task_settings).
   final _entriesByGuid = <String, _Entry>{};
   List<_Entry> _recent = const [];
+
+  /// Optimistic completed entries shown immediately after a calendar/idle
+  /// create, before the POST + refresh round-trip lands. Keyed by toggl_guid;
+  /// dropped in [_composeAndEmit] once the server reports the same guid.
+  final _pendingCreates = <String, _Entry>{};
   final List<_RunningEntry> _running = [];
 
   // Reconcile guard: a confirmed running entry must be absent from the server's
@@ -524,13 +529,29 @@ class RedmineService {
 
     completed.sort((a, b) => b.start.compareTo(a.start));
     _recent = completed;
-    _entriesByGuid
-      ..clear()
-      ..addEntries(completed.map((e) => MapEntry(_displayGuid(e), e)));
 
     _reconcileRunning(open);
 
-    final list = _groupByDay(completed);
+    _composeAndEmit();
+  }
+
+  /// Build the display list from the last server snapshot ([_recent]) plus any
+  /// still-unconfirmed optimistic creates, then emit. Pending creates the
+  /// server now reports (matched by toggl_guid) are dropped first, so the
+  /// authoritative row replaces the placeholder with no duplicate.
+  void _composeAndEmit() {
+    if (_pendingCreates.isNotEmpty) {
+      final serverGuids =
+          _recent.map((e) => e.guid).where((g) => g.isNotEmpty).toSet();
+      _pendingCreates.removeWhere((g, _) => serverGuids.contains(g));
+    }
+    final all = [..._recent, ..._pendingCreates.values]
+      ..sort((a, b) => b.start.compareTo(a.start));
+    _entriesByGuid
+      ..clear()
+      ..addEntries(all.map((e) => MapEntry(_displayGuid(e), e)));
+
+    final list = _groupByDay(all);
     _lastTimeEntries = list;
     _emit(_timeEntries, list);
     _emit(_showLoadMore, false);
@@ -904,6 +925,38 @@ class RedmineService {
     }());
   }
 
+  /// Calendar tap-to-create: create a COMPLETED entry placed at an explicit
+  /// [start]/[end] against the picked issue. Mirrors [logIdleAsNewEntry]'s
+  /// label registration, then posts via [_createCompletedEntry].
+  Future<void> createEntryAt({
+    required int issueId,
+    required int projectId,
+    required DateTime start,
+    required DateTime end,
+    String description = '',
+    String subject = '',
+    String projectName = '',
+    int? activityId,
+  }) async {
+    if (issueId != 0 && subject.isNotEmpty) {
+      _issues[issueId] = _Issue(issueId, subject);
+    }
+    if (projectId != 0 &&
+        projectName.isNotEmpty &&
+        !_projects.containsKey(projectId)) {
+      _projects[projectId] =
+          _Project(projectId, projectName, _colorFor(projectId));
+    }
+    await _createCompletedEntry(
+      issueId: issueId,
+      projectId: projectId,
+      description: description,
+      start: start,
+      end: end,
+      activityId: activityId ?? _defaultActivityId,
+    );
+  }
+
   /// POST a finished entry directly (used by the idle "add as new" flow);
   /// queues offline like the other writes.
   Future<void> _createCompletedEntry({
@@ -919,6 +972,22 @@ class RedmineService {
     var hours = end.difference(start).inSeconds / 3600.0;
     if (hours < 0) hours = 0;
     final guid = _uuid();
+
+    // Optimistic: surface the entry immediately so the calendar/list update the
+    // instant the issue is picked, not after the POST + refresh round-trip.
+    _pendingCreates[guid] = _Entry(
+      id: 0,
+      guid: guid,
+      pid: projectId,
+      tid: issueId,
+      activityId: activityId,
+      description: description,
+      start: start,
+      stop: end,
+      running: false,
+    );
+    _composeAndEmit();
+
     try {
       await api.createTimeEntry(
         issueId: issueId,
@@ -935,6 +1004,10 @@ class RedmineService {
         cfGuid: _cfGuid,
       );
       await refresh();
+      // The authoritative row (if the server reflects it) is now in _recent;
+      // clear the placeholder unconditionally so a guid that failed to
+      // round-trip can never linger as a phantom that narrows real entries.
+      if (_pendingCreates.remove(guid) != null) _composeAndEmit();
     } on RedmineException catch (e) {
       if (e.kind == RedmineErrorKind.network) {
         await _queue.enqueue({
@@ -953,7 +1026,10 @@ class RedmineService {
           'cfGuid': _cfGuid,
         });
         _emit(_onlineState, 1);
+        // Keep the optimistic entry visible; it syncs when the queue flushes.
       } else {
+        _pendingCreates.remove(guid);
+        _composeAndEmit(); // hard failure → roll back the placeholder
         _reportError(e);
       }
     }
