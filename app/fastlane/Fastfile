@@ -36,11 +36,12 @@ platform :ios do
     team = ENV.fetch("APPLE_TEAM_ID")
 
     # Download (read-only) the existing App Store profiles for both bundle ids and
-    # install them. sigh exports the profile names as `sigh_<id>_appstore_*` env.
+    # install them. get_provisioning_profile sets lane_context[SIGH_NAME] to the
+    # profile it just fetched, so capture each name right after its call.
     get_provisioning_profile(api_key: api_key, app_identifier: MAIN_APP_ID, readonly: true)
+    main_profile = lane_context[SharedValues::SIGH_NAME]
     get_provisioning_profile(api_key: api_key, app_identifier: EXT_APP_ID, readonly: true)
-    main_profile = ENV.fetch("sigh_#{MAIN_APP_ID}_appstore_profile-name")
-    ext_profile  = ENV.fetch("sigh_#{EXT_APP_ID}_appstore_profile-name")
+    ext_profile = lane_context[SharedValues::SIGH_NAME]
 
     # Force manual signing with those profiles (keeps the committed pbxproj
     # team-agnostic — CI mutates it on the throwaway runner).
