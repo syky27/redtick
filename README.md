@@ -6,7 +6,6 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/backend-Redmine-A11C1C?style=flat" alt="Redmine backend">
-  <img src="https://img.shields.io/badge/built%20with-Claude%20Code-D97757?style=flat" alt="Built with Claude Code">
   <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20iOS%20%7C%20Android-444?style=flat" alt="Platforms">
   <img src="https://img.shields.io/badge/macOS-verified-2ea44f?style=flat" alt="macOS verified">
   <img src="https://img.shields.io/badge/licence-BSD--3-green" alt="Licence BSD-3">
@@ -14,7 +13,6 @@
 
 <p align="center">
   <a href="#about">About</a> •
-  <a href="#built-with-claude-code">Built with Claude Code</a> •
   <a href="#how-it-works">How it works</a> •
   <a href="#redmine-setup-required-custom-fields">Custom fields</a> •
   <a href="#install">Install</a> •
@@ -25,7 +23,7 @@
 
 # About
 
-**Redtick** is a community fork of [Toggl Desktop](https://github.com/toggl-open-source/toggldesktop) that swaps the Toggl cloud backend for **Redmine**. You keep the fast, friendly desktop timer, but every entry you track lands in your own Redmine instance instead of Toggl's servers.
+**Redtick** is a Redmine-native desktop time tracker. It started as a fork of [Toggl Desktop](https://github.com/toggl-open-source/toggldesktop) and keeps that fast, friendly timer experience, but the app has been rewritten from the ground up to send every entry straight to your own **Redmine** instance instead of the Toggl cloud.
 
 No Toggl account. No third-party cloud. Your time data stays on the Redmine server you point it at.
 
@@ -35,13 +33,11 @@ What it does today (verified on macOS):
 - **Projects and your issues load automatically**, and you can **search any issue your token can see** — by issue number or by text, not just the ones assigned to you.
 - **Start/stop a timer on a Redmine issue.** On stop it creates a Redmine time entry with `hours`, `spent_on`, `activity`, comments, and the exact start/stop timestamps stored in custom fields. Edits `PUT`, deletes `DELETE`.
 - **Every entry must be linked to a Redmine issue** — the timer refuses to start without one.
+- **Track several things at once (optional).** By default it's a classic single timer — starting a task stops the running one. Turn on concurrent tracking in Preferences and multiple timers run side by side, stacked in the top bar.
 - **Day calendar view** with draggable blocks: move/resize entries, click an empty slot to create one, click a block to edit. A timer that runs past local midnight is split into one entry per day so Redmine's per-day hours stay correct.
 - **Activity picker** — choose a default activity in Preferences and override it per entry; activities are pulled live from Redmine.
-- **Pause-on-idle**, reminders and Pomodoro carry over from Toggl Desktop. The idle prompt lets you keep or discard idle time. Idle detection runs on macOS, Windows, and Linux X11 desktops (plus GNOME on Wayland); on other Wayland sessions (e.g. KDE Plasma, sway) the idle prompt stays inactive.
-
-# Built with Claude Code
-
-This fork was implemented **almost entirely by [Claude Code](https://claude.com/claude-code)** (Anthropic) — the Redmine backend retarget, the removal of Toggl-only cruft, the calendar/issue-picker UI, and this Redtick rebrand. Every commit on this branch is Claude-attributed by design. Treat the code accordingly: it has been built and verified, but it is AI-authored and benefits from review before you rely on it.
+- **Pause-on-idle.** When you step away, the idle prompt lets you keep or discard the idle time. Idle detection runs on macOS, Windows, and Linux X11 desktops (plus GNOME on Wayland); on other Wayland sessions (e.g. KDE Plasma, sway) the idle prompt stays inactive.
+- **"You're not tracking" reminder.** When the app is running but no timer is active, Redtick nudges you to start one — on a configurable interval, weekdays, and active-hours window (modeled on Toggl Desktop's reminder settings).
 
 # How it works
 
@@ -158,8 +154,10 @@ no signed CI release for them yet — that work is tracked in
 
 # Credits
 
-Redtick is built on **[Toggl Desktop](https://github.com/toggl-open-source/toggldesktop)** by the Toggl team and open-source contributors, used under the **BSD-3-Clause** licence. Huge thanks to them — Redtick changes the backend and branding; the desktop client itself is their work. The original licence is retained in [`LICENSE`](LICENSE).
+Redtick is a GitHub fork of **[Toggl Desktop](https://github.com/toggl-open-source/toggldesktop)** by the Toggl team and open-source contributors, and it keeps their original **BSD-3-Clause** licence (retained in [`LICENSE`](LICENSE)). Huge thanks to them — Redtick owes that project the idea and the shape of its timer experience.
 
-The Redmine integration and rebrand were authored with **[Claude Code](https://claude.com/claude-code)** (Anthropic).
+The app you run today has been **rewritten from the ground up**, though: the original C++/Qt/Cocoa/WPF client was replaced by a single Flutter/Dart codebase, so essentially none of the original source remains — what carries over is the concept, reimplemented for Redmine.
+
+The interface was designed with **[Claude](https://claude.com/claude-code)** and parts of the code were written with Claude Code (Anthropic), all reviewed by a human. It's built and verified, but worth your own review before you rely on it.
 
 Redtick is not affiliated with or endorsed by Toggl, Anthropic, or the Redmine project.
