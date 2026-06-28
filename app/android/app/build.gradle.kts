@@ -25,6 +25,9 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // flutter_local_notifications (used by reminders + the running-timer
+        // ongoing notification) requires core library desugaring.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -75,4 +78,9 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Required by flutter_local_notifications (core library desugaring).
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
