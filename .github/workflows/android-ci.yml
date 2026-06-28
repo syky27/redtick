@@ -64,29 +64,6 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
           disable-animations: true
           working-directory: app
-          script: |
-            # NOTE: android-emulator-runner runs this with dash (/usr/bin/sh),
-            # which has no `set -o pipefail` — keep it POSIX.
-            APK=build/app/outputs/flutter-apk/app-release.apk
-            PKG=cz.syky.redtick.redtick
-            echo "Installing $APK"
-            adb install -r "$APK" || { echo "::error::adb install failed"; exit 1; }
-            adb logcat -c
-            adb shell am start -n "$PKG/.MainActivity"
-            # Watch ~30s: fail fast on a FATAL EXCEPTION; otherwise require the
-            # process to be alive at the end (a startup crash leaves it dead).
-            for i in $(seq 1 30); do
-              if adb logcat -d | grep -q "FATAL EXCEPTION"; then
-                echo "::error::FATAL EXCEPTION after launch — release-mode startup crash."
-                adb logcat -d | grep -A40 "FATAL EXCEPTION" | head -60
-                exit 1
-              fi
-              sleep 1
-            done
-            PID="$(adb shell pidof "$PKG" | tr -d '[:space:]')"
-            if [ -z "$PID" ]; then
-              echo "::error::App not running ~30s after launch — release-mode startup crash."
-              adb logcat -d -t 500 | grep -iE "FATAL|AndroidRuntime|E flutter|Exception|InitializationProvider|redtick" | tail -60 || true
-              exit 1
-            fi
-            echo "Smoke test passed: $PKG launched (pid $PID) and stayed alive."
+          # A single command → one shell process (android-emulator-runner runs each
+          # inline line in its own shell, which would drop shared variables).
+          script: ./tool/android_smoke_test.sh
