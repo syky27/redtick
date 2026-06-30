@@ -89,6 +89,18 @@ jobs:
           rm -rf "$APPDIR"
           mkdir -p "$APPDIR/usr/bin"
           cp -r build/linux/x64/release/bundle/. "$APPDIR/usr/bin/"
+          # Bundle libXss.so.1 (X11 ScreenSaver ext, idle-detection fallback in
+          # runner/my_application.cc). It is a DIRECT DT_NEEDED of redtick whose
+          # DT_RUNPATH is $ORIGIN/lib, so a copy in usr/bin/lib/ is found by the
+          # loader. libXss is NOT on the AppImage excludelist; its own X11 deps
+          # ARE, so we leave libX11/libXext/libxcb to the host.
+          BIN="$APPDIR/usr/bin/redtick"
+          XSS=$(ldd "$BIN" | awk '/libXss\.so\.1/ {print $3; exit}')
+          if [ -z "$XSS" ] || [ ! -e "$XSS" ]; then
+            echo "::error::Could not resolve libXss.so.1 for $BIN"; ldd "$BIN" || true; exit 1
+          fi
+          cp -L "$XSS" "$APPDIR/usr/bin/lib/libXss.so.1"
+          echo "Bundled libXss.so.1 from $XSS"
           cp packaging/linux/redtick.desktop "$APPDIR/redtick.desktop"
           cp packaging/linux/AppRun "$APPDIR/AppRun"
           chmod +x "$APPDIR/AppRun"
@@ -96,7 +108,11 @@ jobs:
           cp assets/icon/icon_master.png "$APPDIR/.DirIcon"
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
+          # Modern static type-2 runtime: uses fusermount3, so the AppImage no
+          # longer hard-requires libfuse2 on FUSE3-only distros (Ubuntu 24.04, …).
+          wget -q https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64 -O runtime-x86_64
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --no-appstream \
+            --runtime-file runtime-x86_64 \
             "$APPDIR" "redtick-${{ steps.ver.outputs.tag }}-x86_64.AppImage"
 
       # ---- macOS: sign + notarize (gated on signing secrets) ----
@@ -271,8 +287,8 @@ jobs:
               needed.
             - **Windows** — `redtick-*-setup.exe`. Not code-signed yet: SmartScreen may
               warn for an unknown publisher — **More info → Run anyway**.
-            - **Linux** — `redtick-*-x86_64.AppImage`. `chmod +x` it and run; requires
-              system GTK 3.
+            - **Linux** — `redtick-*-x86_64.AppImage`. `chmod +x` it and run; needs
+              system GTK 3 (libfuse2 no longer required on FUSE3 distros).
             - **Android** — `redtick-*-arm64-v8a.apk` (most phones; `armeabi-v7a` for
               older 32-bit devices, `x86_64` for emulators). Sideload: enable "install
               unknown apps" for your browser/file manager, then open the APK. Not on
