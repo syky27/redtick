@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/redmine_service.dart';
@@ -25,8 +27,11 @@ class _IssuePickerDialog extends ConsumerStatefulWidget {
 
 class _IssuePickerDialogState extends ConsumerState<_IssuePickerDialog> {
   final _search = TextEditingController();
+  final _scroll = ScrollController();
   IssueScope _scope = IssueScope.mine;
   List<IssueResult> _results = const [];
+  List<GlobalKey> _rowKeys = const [];
+  int _selected = 0;
   bool _loading = true;
   Timer? _debounce;
   int _reqId = 0;
@@ -41,6 +46,7 @@ class _IssuePickerDialogState extends ConsumerState<_IssuePickerDialog> {
   void dispose() {
     _debounce?.cancel();
     _search.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -52,12 +58,23 @@ class _IssuePickerDialogState extends ConsumerState<_IssuePickerDialog> {
   Future<void> _load() async {
     final id = ++_reqId;
     setState(() => _loading = true);
-    final res = await ref
-        .read(coreServiceProvider)
-        .searchIssues(query: _search.text.trim(), scope: _scope);
+    final query = _search.text.trim();
+    final svc = ref.read(coreServiceProvider);
+    var scope = _scope;
+    var res = await svc.searchIssues(query: query, scope: scope);
     if (!mounted || id != _reqId) return;
+    // Broaden narrow scopes (mine / assigned) → all when a typed query finds
+    // nothing, so the user still lands on the issue they're searching for.
+    if (res.isEmpty && query.isNotEmpty && scope != IssueScope.all) {
+      scope = IssueScope.all;
+      res = await svc.searchIssues(query: query, scope: scope);
+      if (!mounted || id != _reqId) return;
+    }
     setState(() {
+      _scope = scope;
       _results = res;
+      _rowKeys = List.generate(res.length, (_) => GlobalKey());
+      _selected = 0;
       _loading = false;
     });
   }
@@ -68,11 +85,29 @@ class _IssuePickerDialogState extends ConsumerState<_IssuePickerDialog> {
     _load();
   }
 
+  void _move(int delta) {
+    if (_results.isEmpty) return;
+    setState(() => _selected = (_selected + delta).clamp(0, _results.length - 1));
+    final ctx = _rowKeys[_selected].currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx,
+          alignment: 0.5, duration: const Duration(milliseconds: 120));
+    }
+  }
+
+  void _confirm() {
+    if (_results.isEmpty) return;
+    Navigator.of(context).pop(_results[_selected]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).extension<RedtickTokens>()!;
-    return Dialog(
+    // ↵/↑↓/esc navigation is a physical-keyboard affordance: desktop only.
+    final isDesktop =
+        Platform.isMacOS || Platform.isWindows || Platform.isLinux;
+    final dialog = Dialog(
       backgroundColor: cs.surface,
       shape:
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -87,6 +122,7 @@ class _IssuePickerDialogState extends ConsumerState<_IssuePickerDialog> {
                 controller: _search,
                 autofocus: true,
                 onChanged: _onQuery,
+                onSubmitted: isDesktop ? (_) => _confirm() : null,
                 decoration: InputDecoration(
                   prefixIcon: const Icon(Icons.search, size: 18),
                   hintText: '#num or text',
@@ -95,17 +131,20 @@ class _IssuePickerDialogState extends ConsumerState<_IssuePickerDialog> {
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  _SegBtn('My issues', _scope == IssueScope.mine,
-                      () => _setScope(IssueScope.mine)),
-                  const SizedBox(width: 8),
-                  _SegBtn('Assigned', _scope == IssueScope.assigned,
-                      () => _setScope(IssueScope.assigned)),
-                  const SizedBox(width: 8),
-                  _SegBtn('All visible', _scope == IssueScope.all,
-                      () => _setScope(IssueScope.all)),
-                ],
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _SegBtn('My issues', _scope == IssueScope.mine,
+                        () => _setScope(IssueScope.mine)),
+                    _SegBtn('Assigned', _scope == IssueScope.assigned,
+                        () => _setScope(IssueScope.assigned)),
+                    _SegBtn('All visible', _scope == IssueScope.all,
+                        () => _setScope(IssueScope.all)),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -118,44 +157,81 @@ class _IssuePickerDialogState extends ConsumerState<_IssuePickerDialog> {
                           child: Text('No issues',
                               style: TextStyle(color: cs.onSurfaceVariant)))
                       : ListView.separated(
+                          controller: _scroll,
                           itemCount: _results.length,
                           separatorBuilder: (_, _) =>
                               Divider(height: 1, color: t.hairline),
-                          itemBuilder: (context, i) =>
-                              _Row(issue: _results[i]),
+                          itemBuilder: (context, i) => _Row(
+                            key: _rowKeys[i],
+                            issue: _results[i],
+                            selected: isDesktop && i == _selected,
+                            onHover: isDesktop
+                                ? () {
+                                    if (_selected != i) {
+                                      setState(() => _selected = i);
+                                    }
+                                  }
+                                : null,
+                          ),
                         ),
             ),
-            Divider(height: 1, color: t.hairline),
-            Padding(
-              padding: const EdgeInsets.all(10),
-              child: Row(
-                children: [
-                  _Hint('↵', 'Start timer'),
-                  const SizedBox(width: 16),
-                  _Hint('↑↓', 'Navigate'),
-                  const Spacer(),
-                  _Hint('esc', 'Close'),
-                ],
+            if (isDesktop) ...[
+              Divider(height: 1, color: t.hairline),
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: Row(
+                  children: [
+                    _Hint('↵', 'Start timer'),
+                    const SizedBox(width: 16),
+                    _Hint('↑↓', 'Navigate'),
+                    const Spacer(),
+                    _Hint('esc', 'Close'),
+                  ],
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),
+    );
+    if (!isDesktop) return dialog;
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
+        const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Navigator.of(context).pop(),
+      },
+      child: dialog,
     );
   }
 }
 
 class _Row extends StatelessWidget {
-  const _Row({required this.issue});
+  const _Row({
+    super.key,
+    required this.issue,
+    this.selected = false,
+    this.onHover,
+  });
   final IssueResult issue;
+  final bool selected;
+  final VoidCallback? onHover;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).extension<RedtickTokens>()!;
     final dot = projectColorForId(issue.projectId);
     return InkWell(
       onTap: () => Navigator.of(context).pop(issue),
-      child: Padding(
+      onHover: onHover == null
+          ? null
+          : (h) {
+              if (h) onHover!();
+            },
+      child: Container(
+        color: selected ? t.accentSoft : null,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         child: Row(
           children: [
