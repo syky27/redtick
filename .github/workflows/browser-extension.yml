@@ -1,9 +1,12 @@
-# Package the Redtick browser extension and publish Firefox to AMO.
+# Package the Redtick browser extension and publish it to both stores.
 # On every extension change, validate the standalone JS files and produce a zip
 # with manifest.json at the archive root, attached to the GitHub Release on v*
-# tags (the Chromium/Edge/Brave package). On v* tags, if AMO credentials are
-# available, the tag-stamped version is also submitted to the add-on's LISTED
-# (public) addons.mozilla.org channel — Firefox users install from AMO.
+# tags. On v* tags, when the store secrets are configured, the tag-stamped version
+# is also published automatically:
+#   - Chrome Web Store (CWS_CLIENT_ID / CWS_CLIENT_SECRET / CWS_REFRESH_TOKEN) —
+#     Chrome, Edge, and Brave.
+#   - addons.mozilla.org LISTED channel (WEB_EXT_API_KEY / WEB_EXT_API_SECRET) —
+#     Firefox.
 name: browser-extension
 
 on:
@@ -172,12 +175,75 @@ jobs:
           set -euo pipefail
           # Submit the tag-stamped version to the add-on's LISTED (public) AMO channel.
           # --approval-timeout 0 uploads and returns without blocking on AMO review.
-          # The public listing's metadata + screenshots are set up once in the AMO
-          # Developer Hub; each tagged release then submits the new version here.
+          # AMO requires a license on every listed version, so pass the repo's
+          # BSD-3-Clause via --amo-metadata. The listing's summary/categories/
+          # screenshots are set up once in the AMO Developer Hub (first submission).
+          cat > amo-metadata.json <<'JSON'
+          { "version": { "license": "BSD-3-Clause" } }
+          JSON
           npx --yes web-ext@${{ env.WEB_EXT_VERSION }} sign \
             --source-dir build/browser-extension \
             --channel=listed \
+            --amo-metadata amo-metadata.json \
             --approval-timeout 0
+
+      - name: Detect Chrome Web Store publishing capability
+        id: cws
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        shell: bash
+        run: |
+          # Publish to the Chrome Web Store only on v* tags (the version is stamped
+          # from the tag) and only when the OAuth secrets are configured.
+          if [[ "$GITHUB_REF" == refs/tags/* && -n "$CWS_CLIENT_ID" && -n "$CWS_CLIENT_SECRET" && -n "$CWS_REFRESH_TOKEN" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Chrome Web Store secrets absent or non-tag build — skipping CWS publish."
+          fi
+
+      - name: Upload and publish to the Chrome Web Store
+        if: steps.cws.outputs.enabled == 'true'
+        # Non-fatal: a CWS API hiccup must never drop the release — the zip is still
+        # attached for manual upload.
+        continue-on-error: true
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_ITEM_ID: lbmdempbcmkhliblbdbaalojlffcpdka
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="$(ls dist/redtick-browser-extension-*.zip | head -1)"
+          echo "Uploading $ZIP to Chrome Web Store item $CWS_ITEM_ID"
+          TOKEN="$(curl -s https://oauth2.googleapis.com/token \
+            -d client_id="$CWS_CLIENT_ID" \
+            -d client_secret="$CWS_CLIENT_SECRET" \
+            -d refresh_token="$CWS_REFRESH_TOKEN" \
+            -d grant_type=refresh_token | jq -r '.access_token // empty')"
+          if [[ -z "$TOKEN" ]]; then
+            echo "::error::Could not obtain a Chrome Web Store access token."; exit 1
+          fi
+          UP="$(curl -s -X PUT -T "$ZIP" \
+            -H "Authorization: Bearer $TOKEN" -H "x-goog-api-version: 2" \
+            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$CWS_ITEM_ID")"
+          echo "$UP"
+          if [[ "$(echo "$UP" | jq -r '.uploadState // empty')" != "SUCCESS" ]]; then
+            echo "::error::Chrome Web Store upload did not succeed."; exit 1
+          fi
+          PUB="$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+            -H "x-goog-api-version: 2" -H "Content-Length: 0" \
+            "https://www.googleapis.com/chromewebstore/v1.1/items/$CWS_ITEM_ID/publish")"
+          echo "$PUB"
+          STATUS="$(echo "$PUB" | jq -r '.status[0] // empty')"
+          if [[ "$STATUS" == "OK" || "$STATUS" == "ITEM_PENDING_REVIEW" ]]; then
+            echo "Chrome Web Store publish accepted: $STATUS"
+          else
+            echo "::error::Chrome Web Store publish returned an unexpected status."; exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
