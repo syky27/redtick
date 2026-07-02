@@ -94,35 +94,44 @@ The `browser-extension` GitHub Actions workflow then:
 2. stamps the staged `manifest.json` version from the tag,
 3. builds `redtick-browser-extension-v1.2.3.zip` for Chromium browsers and
    attaches it to the GitHub Release,
-4. submits the staged extension to the add-on's **listed (public)** Firefox AMO
-   channel so Firefox users install from addons.mozilla.org.
+4. uploads and publishes that version to the **Chrome Web Store**, and
+5. submits it to the add-on's **listed (public)** Firefox AMO channel so Firefox
+   users install from addons.mozilla.org.
 
-## AMO publishing (listed)
+## Store publishing (Chrome + Firefox)
 
-On `v*` tags, GitHub Actions submits the tag-stamped version to the add-on's
-**listed (public)** AMO channel when these repository secrets are set:
+On `v*` tags, GitHub Actions publishes the tag-stamped version to both stores when
+the matching repository secrets are set. Each publish step is non-fatal, so a store
+outage never blocks the release.
+
+**Chrome Web Store** (Chrome / Edge / Brave) — uploads and publishes via the CWS API:
+
+- `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN` — OAuth credentials for
+  the Chrome Web Store API. The public item id
+  (`lbmdempbcmkhliblbdbaalojlffcpdka`) is set in the workflow.
+
+**Firefox AMO** — submits to the add-on's **listed (public)** channel:
 
 - `WEB_EXT_API_KEY` — the AMO JWT issuer.
 - `WEB_EXT_API_SECRET` — the AMO JWT secret.
-
-The workflow runs:
 
 ```bash
 npx web-ext sign \
   --source-dir build/browser-extension \
   --channel=listed \
+  --amo-metadata amo-metadata.json \   # { "version": { "license": "BSD-3-Clause" } }
   --approval-timeout 0
 ```
 
-The public listing's metadata (name, description, screenshots, categories) is set
-up **once** in the [AMO Developer Hub](https://addons.mozilla.org/developers/); see
+Each store's listing (name, description, screenshots, categories, and — for Firefox
+— the license) is created **once** in that store's dashboard; see
 [`docs/store/submission-checklist.md`](../docs/store/submission-checklist.md). After
-that, each tagged release submits a new version — AMO reviews it, then it goes live.
+the first listing exists, tagged releases ship new versions automatically.
 
 The workflow stamps the staged `manifest.json` version from the tag before
 packaging and submitting. Use tags like `v1.2.3` or `v1.2.3+4` (the latter becomes
-extension version `1.2.3.4`); AMO rejects re-uploads of a version that already
-exists, so every release must bump the version.
+extension version `1.2.3.4`); both stores reject re-uploads of an existing version,
+so every release must bump the version.
 
 ## How it works
 

@@ -73,3 +73,28 @@ policy) is ready in this repo.
 - **No remote code / analytics** in the package — this keeps review fast on both stores.
 - **Edge Add-ons** (optional, later): the same zip works; Microsoft's store is free and
   Chromium-compatible.
+
+## 4. CI secrets for automated publishing
+Once each store's listing exists (the one-time manual steps above), the
+`browser-extension` workflow publishes every `v*` tag automatically when these
+**repository secrets** are set (Settings → Secrets and variables → Actions). Each
+publish step is non-fatal — a missing secret or store outage just skips that store.
+
+**Chrome Web Store** — OAuth2 credentials with the Chrome Web Store API scope
+(create a Google Cloud project, enable the API, generate an OAuth client, then mint a
+refresh token). See <https://developer.chrome.com/docs/webstore/using-api>.
+
+- `CWS_CLIENT_ID`
+- `CWS_CLIENT_SECRET`
+- `CWS_REFRESH_TOKEN`
+
+(The public item id `lbmdempbcmkhliblbdbaalojlffcpdka` is hard-coded in the workflow.)
+
+**Firefox AMO** — API credentials from
+<https://addons.mozilla.org/developers/addon/api/key/>.
+
+- `WEB_EXT_API_KEY`
+- `WEB_EXT_API_SECRET`
+
+The workflow sends the BSD-3-Clause license automatically (`--amo-metadata`), so AMO
+accepts each listed version without manual license entry.

@@ -154,19 +154,22 @@ For local source installs and packaging commands, see
 
 ## How the extension gets published
 
-On every `v*` tag, GitHub Actions:
+On every `v*` tag, GitHub Actions packages `redtick-browser-extension-<tag>.zip`
+and attaches it to the GitHub Release (extract + load unpacked for a manual
+install). When the store secrets are configured, it also publishes the
+tag-stamped version to both stores automatically:
 
-- **Chrome / Edge / Brave** — packages `redtick-browser-extension-<tag>.zip` and
-  attaches it to the GitHub Release. Extract it and load it unpacked, or upload it
-  to the Chrome Web Store (see [`docs/store/`](docs/store)).
-- **Firefox** — submits the tag-stamped version to the add-on's **listed (public)**
-  channel on [addons.mozilla.org](https://addons.mozilla.org) using
-  `WEB_EXT_API_KEY` and `WEB_EXT_API_SECRET`, so Firefox users install from AMO.
+- **Chrome Web Store** (Chrome / Edge / Brave) — uploads and publishes via the CWS
+  API using `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, and `CWS_REFRESH_TOKEN`.
+- **Firefox** — submits to the add-on's **listed (public)** channel on
+  [addons.mozilla.org](https://addons.mozilla.org) using `WEB_EXT_API_KEY` and
+  `WEB_EXT_API_SECRET` (the BSD-3-Clause license is sent automatically).
 
-The public AMO listing's metadata and screenshots are set up **once** in the AMO
-Developer Hub (see
-[`docs/store/submission-checklist.md`](docs/store/submission-checklist.md)); after
-that, each tagged release submits the new version automatically.
+Each store's listing (name, description, screenshots, categories) must be created
+**once** in that store's dashboard — see
+[`docs/store/submission-checklist.md`](docs/store/submission-checklist.md), which
+also lists the CI secrets. After the first listing exists, each tagged release
+ships the new version automatically.
 
 # Configure
 
