@@ -175,12 +175,14 @@ jobs:
           set -euo pipefail
           # Submit the tag-stamped version to the add-on's LISTED (public) AMO channel.
           # --approval-timeout 0 uploads and returns without blocking on AMO review.
-          # AMO requires a license on every listed version, so pass the repo's
-          # BSD-3-Clause via --amo-metadata. The listing's summary/categories/
+          # AMO requires a license on every listed version. Redtick is BSD-3-Clause,
+          # which AMO has no built-in slug for (its list stops at BSD-2-Clause), so
+          # send it as a custom_license built from the repo's LICENSE. jq --rawfile
+          # reads the file and JSON-escapes it. The listing's summary/categories/
           # screenshots are set up once in the AMO Developer Hub (first submission).
-          cat > amo-metadata.json <<'JSON'
-          { "version": { "license": "BSD-3-Clause" } }
-          JSON
+          jq -n --rawfile text LICENSE \
+            '{version: {custom_license: {name: {"en-US": "BSD 3-Clause License"}, text: {"en-US": $text}}}}' \
+            > amo-metadata.json
           npx --yes web-ext@${{ env.WEB_EXT_VERSION }} sign \
             --source-dir build/browser-extension \
             --channel=listed \
