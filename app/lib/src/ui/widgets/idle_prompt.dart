@@ -186,16 +186,18 @@ Future<IdleChoice?> _showIdlePrompt(
   DateTime idleStart,
   int idleMinutes,
 ) {
-  final cs = Theme.of(context).colorScheme;
-  final t = Theme.of(context).extension<RedtickTokens>()!;
   String hhmm(DateTime d) =>
       '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
   return showDialog<IdleChoice>(
     context: context,
     barrierDismissible: false,
+    // Read theme values live from the builder context (not captured before
+    // showDialog): the default themeMode is system, so a macOS Light↔Dark switch
+    // can flip the app theme while this modal is open, and a captured color would
+    // freeze — leaving text dark-on-dark. Reading via ctx re-themes on the flip.
     builder: (ctx) => Dialog(
-      backgroundColor: cs.surface,
+      backgroundColor: Theme.of(ctx).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
@@ -212,14 +214,18 @@ Future<IdleChoice?> _showIdlePrompt(
                       ?.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: 4),
               Text('Idle since ${hhmm(idleStart)} · $idleMinutes minutes',
-                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
+                  style: TextStyle(
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      fontSize: 13)),
               const SizedBox(height: 14),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: t.accentSoft,
+                  color: Theme.of(ctx).extension<RedtickTokens>()!.accentSoft,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border(left: BorderSide(color: cs.primary, width: 3)),
+                  border: Border(
+                      left: BorderSide(
+                          color: Theme.of(ctx).colorScheme.primary, width: 3)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
