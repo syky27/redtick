@@ -96,5 +96,6 @@ refresh token). See <https://developer.chrome.com/docs/webstore/using-api>.
 - `WEB_EXT_API_KEY`
 - `WEB_EXT_API_SECRET`
 
-The workflow sends the BSD-3-Clause license automatically (`--amo-metadata`), so AMO
-accepts each listed version without manual license entry.
+The workflow sends the BSD-3-Clause license automatically (`--amo-metadata`, as a
+`custom_license` built from the repo `LICENSE` since AMO has no BSD-3-Clause slug),
+so AMO accepts each listed version without manual license entry.

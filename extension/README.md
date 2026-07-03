@@ -119,7 +119,7 @@ outage never blocks the release.
 npx web-ext sign \
   --source-dir build/browser-extension \
   --channel=listed \
-  --amo-metadata amo-metadata.json \   # { "version": { "license": "BSD-3-Clause" } }
+  --amo-metadata amo-metadata.json \   # custom_license built from the repo LICENSE (BSD-3-Clause)
   --approval-timeout 0
 ```
 
