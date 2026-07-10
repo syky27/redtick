@@ -28,4 +28,20 @@ class AppWindow {
       idleLog('native window.foreground FAILED: $e\n$st');
     }
   }
+
+  /// Pin (`on: true`) or release (`on: false`) the window above other apps'
+  /// windows. [foreground] alone is unreliable on macOS 14+, whose cooperative
+  /// `NSApp.activate()` often won't pull us over the frontmost app, and a normal
+  /// window level doesn't float — so while the idle prompt awaits an answer we
+  /// raise the window level / topmost flag to make it unmissable, then drop back
+  /// to normal once answered. Best-effort and fire-and-forget like [foreground].
+  static Future<void> setAlwaysOnTop(bool on) async {
+    if (!supported) return;
+    try {
+      final ok = await _ch.invokeMethod<bool>('setAlwaysOnTop', {'on': on});
+      idleLog('native window.setAlwaysOnTop($on) -> ok=$ok');
+    } catch (e, st) {
+      idleLog('native window.setAlwaysOnTop($on) FAILED: $e\n$st');
+    }
+  }
 }

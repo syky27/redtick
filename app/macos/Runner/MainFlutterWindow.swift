@@ -42,11 +42,11 @@ class MainFlutterWindow: NSWindow {
       name: "redtick/window",
       binaryMessenger: flutterViewController.engine.binaryMessenger)
     windowChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else {
+        result(false)
+        return
+      }
       if call.method == "foreground" {
-        guard let self = self else {
-          result(false)
-          return
-        }
         // Realistic idle case: the app is in the background and possibly
         // minimized while the user is away.
         if self.isMiniaturized {
@@ -62,6 +62,23 @@ class MainFlutterWindow: NSWindow {
         }
         self.makeKeyAndOrderFront(nil)
         NSLog("[redtick.window] native foreground -> raised")
+        result(true)
+      } else if call.method == "setAlwaysOnTop" {
+        let on = (call.arguments as? [String: Any])?["on"] as? Bool ?? false
+        // A normal window level (0) never floats over other apps, and macOS 14's
+        // cooperative activate() frequently won't pull us over the frontmost app.
+        // While the idle prompt is unanswered we raise to .floating so the window
+        // sits above other apps' normal windows; back to .normal when answered.
+        self.level = on ? .floating : .normal
+        if on {
+          if self.isMiniaturized {
+            self.deminiaturize(nil)
+          }
+          // orderFrontRegardless shows the floating window even when the app is
+          // not the active one (activation may be refused on macOS 14+).
+          self.orderFrontRegardless()
+        }
+        NSLog("[redtick.window] native setAlwaysOnTop -> %@", on ? "true" : "false")
         result(true)
       } else {
         NSLog("[redtick.window] native unimplemented method: %@", call.method)

@@ -4,6 +4,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include <optional>
+#include <variant>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -90,6 +91,29 @@ bool FlutterWindow::OnCreate() {
             FlashWindowEx(&fi);
           }
           result->Success(flutter::EncodableValue(raised != FALSE));
+        } else if (call.method_name() == "setAlwaysOnTop") {
+          HWND hwnd = GetHandle();
+          if (hwnd == nullptr) {
+            result->Success(flutter::EncodableValue(false));
+            return;
+          }
+          bool on = false;
+          const auto* args =
+              std::get_if<flutter::EncodableMap>(call.arguments());
+          if (args != nullptr) {
+            auto it = args->find(flutter::EncodableValue("on"));
+            if (it != args->end()) {
+              if (const bool* v = std::get_if<bool>(&it->second)) {
+                on = *v;
+              }
+            }
+          }
+          // HWND_TOPMOST keeps the window above other apps' non-topmost windows
+          // so the unanswered idle prompt stays visible; HWND_NOTOPMOST releases
+          // it. SWP_NOACTIVATE avoids yanking focus on every re-assert.
+          SetWindowPos(hwnd, on ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+          result->Success(flutter::EncodableValue(true));
         } else {
           result->NotImplemented();
         }

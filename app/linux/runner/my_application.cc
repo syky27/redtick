@@ -124,6 +124,30 @@ static void window_method_call_cb(FlMethodChannel* channel,
     }
     g_autoptr(FlValue) result = fl_value_new_bool(ok);
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else if (strcmp(fl_method_call_get_name(method_call), "setAlwaysOnTop") ==
+             0) {
+    // Pin the window above other apps while the idle prompt is unanswered so it
+    // stays visible, then release it. gtk_window_set_keep_above is a hint the WM
+    // usually honours; pair it with a present() when pinning to raise it now.
+    gboolean on = FALSE;
+    FlValue* args = fl_method_call_get_args(method_call);
+    if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+      FlValue* v = fl_value_lookup_string(args, "on");
+      if (v != nullptr && fl_value_get_type(v) == FL_VALUE_TYPE_BOOL) {
+        on = fl_value_get_bool(v);
+      }
+    }
+    gboolean ok = FALSE;
+    if (self->window != nullptr) {
+      gtk_window_set_keep_above(self->window, on);
+      if (on) {
+        gtk_window_deiconify(self->window);
+        gtk_window_present(self->window);
+      }
+      ok = TRUE;
+    }
+    g_autoptr(FlValue) result = fl_value_new_bool(ok);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }
