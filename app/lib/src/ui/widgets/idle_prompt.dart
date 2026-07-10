@@ -22,6 +22,18 @@ enum IdleChoice { keep, discardStop, discardContinue, addAsNew }
 const int _idleThresholdOverrideSec =
     int.fromEnvironment('REDTICK_IDLE_THRESHOLD_SEC', defaultValue: 0);
 
+/// While the idle prompt sits unanswered, re-raise the window (and re-notify)
+/// this often. The idle event often coincides with the lid closing / the machine
+/// sleeping, so the one-time raise at fire time is easily missed on return; the
+/// repeat ensures the user eventually notices the interrupted timer.
+const Duration _idleRenagInterval = Duration(minutes: 10);
+
+/// Test-only fast trigger for the re-alert cadence, mirroring
+/// [_idleThresholdOverrideSec]. `> 0` shrinks the 10-minute re-raise to N seconds
+/// for a `flutter run` diagnosis; default 0 keeps the shipped 10 min.
+const int _idleRenagOverrideSec =
+    int.fromEnvironment('REDTICK_IDLE_RENAG_SEC', defaultValue: 0);
+
 /// Outcome of evaluating one idle sample against the arming latch.
 enum IdleArmingDecision { active, belowThreshold, latched, fire }
 
@@ -69,6 +81,10 @@ class IdleWatcher extends ConsumerStatefulWidget {
 
 class _IdleWatcherState extends ConsumerState<IdleWatcher> {
   Timer? _timer;
+
+  /// Repeats [AppWindow.foreground] + a notification every [_idleRenagInterval]
+  /// while the prompt is open. Non-null only between fire and dismissal.
+  Timer? _renagTimer;
   final IdleArming _arming = IdleArming();
   bool _showing = false;
 
@@ -76,6 +92,10 @@ class _IdleWatcherState extends ConsumerState<IdleWatcher> {
   void initState() {
     super.initState();
     if (IdleDetector.supported) {
+      // Request OS notification permission up front so the re-alert can surface
+      // as a system notification (idempotent; the reminder watcher also inits,
+      // but don't depend on sibling widget ordering).
+      ref.read(notificationPresenterProvider).init();
       _timer = Timer.periodic(const Duration(seconds: 20), (_) => _check());
       idleLog('watcher.init supported=true pollEvery=20s '
           'thresholdOverrideSec=$_idleThresholdOverrideSec');
@@ -87,7 +107,27 @@ class _IdleWatcherState extends ConsumerState<IdleWatcher> {
   @override
   void dispose() {
     _timer?.cancel();
+    if (_renagTimer != null) {
+      // Torn down (e.g. logout) with the prompt still open: unpin so we don't
+      // leave the window stuck above everything.
+      _renagTimer!.cancel();
+      unawaited(AppWindow.setAlwaysOnTop(false));
+    }
     super.dispose();
+  }
+
+  /// Fired on the [_renagTimer] cadence while the prompt is open: re-raise the
+  /// window and re-notify so a user returning to the machine (e.g. after the lid
+  /// was closed at idle time) reliably notices the pending prompt.
+  void _renag() {
+    if (!mounted) return;
+    idleLog('renag: idle prompt still open -> re-foreground + notify');
+    // Re-assert the pin (defensive: a WM could have dropped it) and try again to
+    // grab focus / flash the taskbar, plus a fresh notification.
+    unawaited(AppWindow.setAlwaysOnTop(true));
+    unawaited(AppWindow.foreground());
+    unawaited(ref.read(notificationPresenterProvider).show(
+        'Redtick', "You've been idle — decide about your running timer."));
   }
 
   Future<void> _check() async {
@@ -135,6 +175,19 @@ class _IdleWatcherState extends ConsumerState<IdleWatcher> {
     // Fire-and-forget: foreground() swallows its own errors, and the prompt is
     // modal so it shows regardless of whether the raise succeeds.
     unawaited(AppWindow.foreground());
+    // Pin above other apps while the prompt is unanswered: foreground() alone is
+    // unreliable on macOS 14+ (cooperative activate() won't pull us over the
+    // frontmost app), so the prompt could stay hidden behind another window.
+    // Released in the finally below (and in dispose).
+    unawaited(AppWindow.setAlwaysOnTop(true));
+    // Keep re-raising + re-notifying every interval until the prompt is answered:
+    // the initial raise above lands at fire time, which the user may miss if the
+    // machine was asleep. Timer.periodic first fires after one full interval, so
+    // no double raise at t=0. Cancelled in the finally below (and in dispose).
+    final renagEvery = _idleRenagOverrideSec > 0
+        ? Duration(seconds: _idleRenagOverrideSec)
+        : _idleRenagInterval;
+    _renagTimer = Timer.periodic(renagEvery, (_) => _renag());
     // try/finally guarantees _showing resets even if the dialog, issue picker,
     // or a core call throws — otherwise _showing stuck true permanently killed
     // detection.
@@ -167,6 +220,11 @@ class _IdleWatcherState extends ConsumerState<IdleWatcher> {
     } catch (e, st) {
       idleLog('check prompt error: $e\n$st');
     } finally {
+      // Prompt answered (or threw): stop the re-raise/notify nag and drop the
+      // window back to normal stacking (unpin) immediately.
+      _renagTimer?.cancel();
+      _renagTimer = null;
+      unawaited(AppWindow.setAlwaysOnTop(false));
       _showing = false;
       // Dismissal == the user is back (the modal only closes on a tap, which
       // resets the OS idle clock). Re-arm so the next idle episode prompts again,

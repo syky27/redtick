@@ -44,4 +44,30 @@ void main() {
     // failure on an unconfigured runner. Must still complete quietly.
     await expectLater(AppWindow.foreground(), completes);
   });
+
+  test('setAlwaysOnTop(true/false) invokes with the "on" flag', () async {
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return true;
+    });
+
+    await AppWindow.setAlwaysOnTop(true);
+    await AppWindow.setAlwaysOnTop(false);
+
+    expect(calls.map((c) => c.method), ['setAlwaysOnTop', 'setAlwaysOnTop']);
+    expect(calls.first.arguments, {'on': true});
+    expect(calls.last.arguments, {'on': false});
+  });
+
+  test('setAlwaysOnTop() swallows a PlatformException (best-effort, no throw)',
+      () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      throw PlatformException(code: 'denied', message: 'wm refused keep-above');
+    });
+
+    // Same fire-and-forget contract as foreground(): the OS refusing to pin the
+    // window must never surface to the idle integration.
+    await expectLater(AppWindow.setAlwaysOnTop(true), completes);
+  });
 }
