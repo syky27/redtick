@@ -13,6 +13,7 @@
 
 <p align="center">
   <a href="#about">About</a> •
+  <a href="#screenshots">Screenshots</a> •
   <a href="#how-it-works">How it works</a> •
   <a href="#redmine-setup-required-custom-fields">Custom fields</a> •
   <a href="#install">Install</a> •
@@ -39,6 +40,38 @@ What it does today (verified on macOS):
 - **Activity picker** — choose a default activity in Preferences and override it per entry; activities are pulled live from Redmine.
 - **Pause-on-idle.** When you step away, the idle prompt lets you keep or discard the idle time. Idle detection runs on macOS, Windows, and Linux X11 desktops (plus GNOME on Wayland); on other Wayland sessions (e.g. KDE Plasma, sway) the idle prompt stays inactive.
 - **"You're not tracking" reminder.** When the app is running but no timer is active, Redtick nudges you to start one — on a configurable interval, weekdays, and active-hours window (modeled on Toggl Desktop's reminder settings).
+
+# Screenshots
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/timer.png" alt="Timer view with a running timer and entries grouped by day" width="100%"><br>
+      <sub><b>Timer</b> — running timer, entries grouped by day</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/reports.png" alt="Reports view showing tracked time over the last 30 days by project" width="100%"><br>
+      <sub><b>Reports</b> — time by project over a week / month / 30 days</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/settings-account.png" alt="Settings: appearance, Redmine account, and tracking options" width="100%"><br>
+      <sub><b>Settings</b> — appearance, Redmine account, tracking</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/settings-idle-reminders.png" alt="Settings: idle detection and not-tracking reminders" width="100%"><br>
+      <sub><b>Settings</b> — idle detection &amp; reminders</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/settings-custom-fields.png" alt="Settings: Redmine custom fields and diagnostics" width="100%"><br>
+      <sub><b>Settings</b> — Redmine custom fields &amp; diagnostics</sub>
+    </td>
+    <td width="50%"></td>
+  </tr>
+</table>
 
 # How it works
 
