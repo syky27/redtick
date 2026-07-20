@@ -163,10 +163,10 @@ jobs:
 
       - name: Submit Firefox version to AMO (listed / public)
         if: steps.amo.outputs.enabled == 'true'
-        # Non-fatal: a listed-submission hiccup (AMO review queue, transient API error)
-        # must never drop the Chromium zip from the release. Listed add-ons are
-        # distributed by AMO, so no self-hosted XPI is produced or attached.
-        continue-on-error: true
+        # Fatal on failure: a rejected listed submission (e.g. a missing required
+        # field) must surface as a red run, not be silently swallowed. Listed
+        # add-ons are distributed by AMO, so no self-hosted XPI is produced. The
+        # release zip still attaches (the artifact step runs on if: !cancelled()).
         env:
           WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
           WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
@@ -178,10 +178,12 @@ jobs:
           # AMO requires a license on every listed version. Redtick is BSD-3-Clause,
           # which AMO has no built-in slug for (its list stops at BSD-2-Clause), so
           # send it as a custom_license built from the repo's LICENSE. jq --rawfile
-          # reads the file and JSON-escapes it. The listing's summary/categories/
-          # screenshots are set up once in the AMO Developer Hub (first submission).
+          # reads the file and JSON-escapes it. AMO also requires a category on every
+          # listed version — sent below via --amo-metadata (API v5 wants a flat slug
+          # array), so no manual AMO Developer Hub setup is needed; name/summary
+          # derive from the manifest. "other" is the safe universal slug.
           jq -n --rawfile text LICENSE \
-            '{version: {custom_license: {name: {"en-US": "BSD 3-Clause License"}, text: {"en-US": $text}}}}' \
+            '{categories: ["other"], version: {custom_license: {name: {"en-US": "BSD 3-Clause License"}, text: {"en-US": $text}}}}' \
             > amo-metadata.json
           npx --yes web-ext@${{ env.WEB_EXT_VERSION }} sign \
             --source-dir build/browser-extension \
@@ -208,9 +210,9 @@ jobs:
 
       - name: Upload and publish to the Chrome Web Store
         if: steps.cws.outputs.enabled == 'true'
-        # Non-fatal: a CWS API hiccup must never drop the release — the zip is still
-        # attached for manual upload.
-        continue-on-error: true
+        # Fatal on failure: a failed publish must surface as a red run rather than
+        # be silently swallowed. The release zip still attaches (the artifact step
+        # runs on if: !cancelled()).
         env:
           CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
           CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
@@ -248,6 +250,9 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@v4
+        # Attach the release zip even if a store publish above failed, so a store
+        # outage/rejection turns the run red without dropping the release artifact.
+        if: ${{ !cancelled() }}
         with:
           name: redtick-browser-extension
           path: dist/redtick-browser-extension-*.zip
