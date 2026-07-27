@@ -211,6 +211,26 @@ ships the new version automatically.
 2. On the login screen, enter the URL of your Redmine instance (e.g. `https://redmine.example.com`) and your personal **API key** (Redmine → *My account* → *API access key*).
 3. Start tracking — entries sync to that Redmine backend.
 
+## Windows certificate error on first login
+
+On some Windows machines, the first login can fail with
+`HandshakeException: CERTIFICATE_VERIFY_FAILED` even though the same Redmine URL
+opens normally in a browser. The browser and Redtick use different TLS
+verification paths, and Windows may not yet have cached the certificate chain
+that Redtick's Dart/BoringSSL client needs.
+
+Open PowerShell and make one certificate-verified request to your Redmine base
+URL (replace the example URL with your own):
+
+```powershell
+curl.exe -sSI https://your-redmine.example.com/ > $null
+```
+
+Then **completely exit Redtick, including its tray process**, and start it again
+so it reloads the updated Windows certificate cache. This TLS failure happens
+before Redtick sends the API key, so changing the key will not fix it. Do not
+disable certificate verification.
+
 ## Custom fields & plain-hours mode
 
 Redtick stores each entry's exact start/stop times and a stable id in three
