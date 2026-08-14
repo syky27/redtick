@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'src/data/http_log.dart';
+import 'src/data/network_activity.dart';
 import 'src/data/redmine_service.dart';
 import 'src/platform/background_reconcile.dart';
 import 'src/platform/deep_link.dart';
@@ -49,13 +50,17 @@ Future<void> main() async {
   // Pure-Dart Redmine backend. `create()` restores a persisted session and
   // auto-logs-in if one exists (the instant-relaunch behaviour). No FFI, no
   // native library, no SQLite.
-  final service = await RedmineService.create(logger: logger);
+  // Feeds the global non-blocking activity indicator; shared by every
+  // RedmineApiClient the service creates.
+  final tracker = NetworkActivityTracker();
+  final service = await RedmineService.create(logger: logger, tracker: tracker);
 
   runApp(
     ProviderScope(
       overrides: [
         coreServiceProvider.overrideWithValue(service),
         httpLoggerProvider.overrideWithValue(logger),
+        networkActivityTrackerProvider.overrideWithValue(tracker),
       ],
       child: const RedtickApp(),
     ),

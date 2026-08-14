@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/providers.dart';
 import '../theme.dart';
+import '../widgets/network_activity_indicator.dart';
 import '../widgets/redtick_logo.dart';
 import 'calendar_screen.dart';
 import 'reports_screen.dart';
@@ -61,7 +62,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       );
     }
     return Scaffold(
-      body: tabs[index].page,
+      // The activity bar is overlaid (not in the column) so it never shifts
+      // layout; IgnorePointer inside keeps it non-blocking.
+      body: Stack(
+        children: [
+          tabs[index].page,
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(bottom: false, child: NetworkActivityBar()),
+          ),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
         onDestinationSelected: (i) => setState(() => _index = i),
@@ -204,9 +217,11 @@ class _InstanceChipState extends ConsumerState<_InstanceChip> {
     final core = ref.watch(coreServiceProvider);
     final online = ref.watch(onlineStateProvider).asData?.value ?? 0;
     final lastSync = ref.watch(syncStateProvider).asData?.value;
+    final busy = ref.watch(networkActivityProvider).asData?.value ?? false;
     final ok = online == 0;
     final host = core.host.isEmpty ? 'redmine' : core.host;
-    final status = ok ? 'Synced · ${_ago(lastSync)}' : 'Offline';
+    final status =
+        busy ? 'Syncing…' : (ok ? 'Synced · ${_ago(lastSync)}' : 'Offline');
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 9, 9, 9),
@@ -228,15 +243,25 @@ class _InstanceChipState extends ConsumerState<_InstanceChip> {
                         fontWeight: FontWeight.w600, fontSize: 12.5)),
                 Row(
                   children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      margin: const EdgeInsets.only(right: 5),
-                      decoration: BoxDecoration(
-                        color: ok ? const Color(0xFF16A34A) : cs.error,
-                        shape: BoxShape.circle,
+                    if (busy)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 5),
+                        child: SizedBox(
+                          width: 8,
+                          height: 8,
+                          child: CircularProgressIndicator(strokeWidth: 1.5),
+                        ),
+                      )
+                    else
+                      Container(
+                        width: 6,
+                        height: 6,
+                        margin: const EdgeInsets.only(right: 5),
+                        decoration: BoxDecoration(
+                          color: ok ? const Color(0xFF16A34A) : cs.error,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                    ),
                     Text(status,
                         style:
                             TextStyle(color: cs.onSurfaceVariant, fontSize: 11)),

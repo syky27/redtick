@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import 'http_log.dart';
+import 'network_activity.dart';
 
 /// Thin Dart client over the Redmine REST API — the native replacement for the
 /// C++ core's `RedmineClient` (`src/redmine_client.cc`).
@@ -19,6 +20,7 @@ class RedmineApiClient {
     required this.apiKey,
     http.Client? client,
     this.logger,
+    this.tracker,
   })  : _baseUrl = _normalizeBase(baseUrl),
         _client = client ?? http.Client();
 
@@ -26,6 +28,7 @@ class RedmineApiClient {
   final String apiKey;
   final http.Client _client;
   final HttpLogger? logger;
+  final NetworkActivityTracker? tracker;
 
   static const int _pageSize = 100;
 
@@ -50,7 +53,16 @@ class RedmineApiClient {
 
   // --- low-level ---
 
-  Future<Map<String, dynamic>> _getJson(String relativeUrl) async {
+  /// Route one request through the activity tracker (no-op without one).
+  Future<T> _tracked<T>(Future<T> Function() op) {
+    final t = tracker;
+    return t == null ? op() : t.track(op);
+  }
+
+  Future<Map<String, dynamic>> _getJson(String relativeUrl) =>
+      _tracked(() => _getJsonImpl(relativeUrl));
+
+  Future<Map<String, dynamic>> _getJsonImpl(String relativeUrl) async {
     final uri = Uri.parse('$_baseUrl$relativeUrl');
     final reqHeaders = <String, String>{
       'X-Redmine-API-Key': apiKey,
@@ -322,6 +334,10 @@ class RedmineApiClient {
   /// Send a write request; returns the parsed JSON body (or null for an empty
   /// 204 response, which Redmine returns for PUT/DELETE).
   Future<Map<String, dynamic>?> _send(
+          String method, String relativeUrl, Map<String, dynamic>? body) =>
+      _tracked(() => _sendImpl(method, relativeUrl, body));
+
+  Future<Map<String, dynamic>?> _sendImpl(
       String method, String relativeUrl, Map<String, dynamic>? body) async {
     final uri = Uri.parse('$_baseUrl$relativeUrl');
     final reqHeaders = <String, String>{
