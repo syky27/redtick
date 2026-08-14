@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/time_entry.dart';
 import '../util/project_color.dart';
 import 'http_log.dart';
+import 'network_activity.dart';
 import 'offline_queue.dart';
 import 'redmine_api_client.dart';
 
@@ -41,12 +42,14 @@ class RedmineService {
     http.Client? httpClient,
     OfflineQueue? queue,
     HttpLogger? logger,
+    NetworkActivityTracker? tracker,
     DateTime Function()? clock,
   }) async {
     final s = RedmineService._()
       .._httpClient = httpClient
       .._queue = queue ?? OfflineQueue()
-      .._logger = logger;
+      .._logger = logger
+      .._tracker = tracker;
     if (clock != null) s._now = clock;
     await s._restore();
     return s;
@@ -55,6 +58,7 @@ class RedmineService {
   http.Client? _httpClient;
   OfflineQueue _queue = OfflineQueue();
   HttpLogger? _logger;
+  NetworkActivityTracker? _tracker;
 
   /// Wall-clock, injectable for tests (the reconcile drop-guard reads it).
   DateTime Function() _now = DateTime.now;
@@ -533,7 +537,8 @@ class RedmineService {
         baseUrl: _baseUrl,
         apiKey: apiKey,
         client: _httpClient,
-        logger: _logger);
+        logger: _logger,
+        tracker: _tracker);
     try {
       final user = await _api!.currentUser();
       _userId = (user['id'] as num).toInt();
@@ -581,7 +586,17 @@ class RedmineService {
   /// [silent] (used by the background poll) suppresses the user-facing error
   /// toast on failure — only `onlineState` is updated — so transient poll
   /// errors don't spam the UI.
-  Future<void> refresh({bool silent = false}) async {
+  Future<void> refresh({bool silent = false}) {
+    // Silent (background) refreshes are bracketed so their requests don't
+    // pulse the global activity indicator; user-triggered refreshes count.
+    final t = _tracker;
+    if (silent && t != null) {
+      return t.runBackground(() => _refreshImpl(silent: true));
+    }
+    return _refreshImpl(silent: silent);
+  }
+
+  Future<void> _refreshImpl({required bool silent}) async {
     final api = _api;
     if (api == null) return;
     if (_refreshing) return; // avoid overlapping pulls mutating the shared maps
@@ -635,6 +650,12 @@ class RedmineService {
     if (_disposed || _refreshing) return;
     final api = _api;
     if (api == null) return;
+    final t = _tracker;
+    if (t != null) return t.runBackground(() => _pollTickImpl(api));
+    return _pollTickImpl(api);
+  }
+
+  Future<void> _pollTickImpl(RedmineApiClient api) async {
     // Cheap single-entry GET only for the common single-confirmed-timer case;
     // with 0 (idle / in-flight start) or >1 running, a full pull is simpler and
     // also discovers timers started on another device.

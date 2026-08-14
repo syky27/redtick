@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/http_log.dart';
+import '../data/network_activity.dart';
 import '../data/redmine_service.dart';
 import '../models/time_entry.dart';
 import '../platform/deep_link.dart';
@@ -144,3 +145,20 @@ final httpLoggerProvider = Provider<HttpLogger>(
   (ref) => throw UnimplementedError(
       'httpLoggerProvider must be overridden in main() with the created HttpLogger'),
 );
+
+/// The shared in-flight request tracker (created in `main()`, injected into
+/// every `RedmineApiClient`). Mirrors the override pattern of
+/// [httpLoggerProvider].
+final networkActivityTrackerProvider = Provider<NetworkActivityTracker>(
+  (ref) => throw UnimplementedError(
+      'networkActivityTrackerProvider must be overridden in main()'),
+);
+
+/// Smoothed "user-initiated network I/O in flight" flag driving the global
+/// non-blocking activity indicator. Replays the current value for late
+/// subscribers.
+final networkActivityProvider = StreamProvider<bool>((ref) async* {
+  final t = ref.watch(networkActivityTrackerProvider);
+  yield t.busyNow;
+  yield* t.busy;
+});
